@@ -31,7 +31,7 @@ As of March 15, 2026, the public status pages showed:
 
 That is the reason this tool exists: you should be able to test outages before your users find them for you.
 
-Think of Bulkhead as Toxiproxy for AI: instead of generic TCP toxics, it injects OpenAI-style API failures, latency, and weighted fault scenarios into LLM traffic so you can test retries, fallbacks, and resilience logic.
+If you know Toxiproxy, Bulkhead is the same basic idea for LLM APIs: it injects OpenAI-style failures, latency, and weighted fault scenarios so you can test retries, fallbacks, and resilience logic.
 
 Bulkhead can run in two modes:
 
@@ -66,32 +66,6 @@ Run it with:
 ```bash
 bulkhead start --mode mock --scenario mixed-transient --fail-rate 0.2
 ```
-
-## Codex Skill
-
-This repo does not currently include a Codex `SKILL.md`.
-
-So today, the way to use Bulkhead is:
-
-1. install the package locally with `pip install -e .`
-2. start Bulkhead with `bulkhead start ...`
-3. point your app or the included examples at `http://localhost:5000/v1`
-
-Example:
-
-```bash
-bulkhead start --config config.yaml
-```
-
-Then in another terminal:
-
-```bash
-cd examples/simple_langchain
-pip install -r requirements.txt
-OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://localhost:5000/v1 python main.py
-```
-
-If you want this repo to be installable as a real Codex skill, the next step is to add a `SKILL.md` that explains when to use Bulkhead and the commands to run. That file does not exist yet.
 
 ## Config
 
@@ -193,4 +167,33 @@ More examples: [examples/README.md](/Users/saikrishna/tfy/bulkhead/examples/READ
 
 ## Codex Skill
 
-A minimal repo-local skill is included at [skills/bulkhead-testing/SKILL.md](/Users/saikrishna/tfy/bulkhead/skills/bulkhead-testing/SKILL.md) for running Bulkhead in `mock` or `proxy` mode, executing a target app, and checking the scorecard endpoints.
+A repo-local Codex skill is included at [skills/bulkhead-testing/SKILL.md](/Users/saikrishna/tfy/bulkhead/skills/bulkhead-testing/SKILL.md).
+
+Install it into Codex by copying it into your local skills directory:
+
+```bash
+mkdir -p ~/.codex/skills/bulkhead-testing
+cp skills/bulkhead-testing/SKILL.md ~/.codex/skills/bulkhead-testing/SKILL.md
+```
+
+Then invoke it by name in Codex, for example:
+
+```text
+Use the bulkhead-testing skill to run the simple_langchain example in mock mode with request_count 10.
+```
+
+Or:
+
+```text
+Use the bulkhead-testing skill to run proxy mode against https://api.openai.com and summarize the scorecard.
+```
+
+Get started locally:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]' -r examples/simple_langchain/requirements.txt -r examples/deepagents/requirements.txt
+cp config.example.yaml config.yaml
+bulkhead start --mode mock --scenario mixed-transient --fail-rate 0
+```

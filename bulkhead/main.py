@@ -181,6 +181,8 @@ def choose(value: Any, fallback: Any) -> Any:
 
 def has_cli_overrides(**values: Any) -> bool:
     return any(value not in (None, "") for value in values.values())
+
+
 def validate_latency_range(latency_min: float, latency_max: float) -> tuple[float, float]:
     if latency_min < 0 or latency_max < 0:
         raise typer.BadParameter("Latency values must be >= 0.")
