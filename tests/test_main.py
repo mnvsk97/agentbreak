@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -116,6 +118,43 @@ def test_resolve_scenario() -> None:
 def test_resolve_scenario_rejects_unknown() -> None:
     with pytest.raises(Exception):
         main.resolve_scenario("nope")
+
+
+def test_maybe_load_config_missing_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main.maybe_load_config(None) == {}
+
+
+def test_maybe_load_config_default_config_yaml(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text("mode: mock\nfail_rate: 0.4\n", encoding="utf-8")
+    assert main.maybe_load_config(None)["mode"] == "mock"
+
+
+def test_maybe_load_config_explicit_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "bulkhead.yaml"
+    config_path.write_text("mode: proxy\nscenario: brownout\n", encoding="utf-8")
+    assert main.maybe_load_config(str(config_path))["scenario"] == "brownout"
+
+
+def test_choose_prefers_cli_value() -> None:
+    assert main.choose("cli", "file") == "cli"
+    assert main.choose(None, "file") == "file"
+
+
+def test_validate_latency_range() -> None:
+    assert main.validate_latency_range(1.0, 2.0) == (1.0, 2.0)
+
+
+def test_validate_latency_range_rejects_invalid_values() -> None:
+    with pytest.raises(Exception):
+        main.validate_latency_range(2.0, 1.0)
+    with pytest.raises(Exception):
+        main.validate_latency_range(-1.0, 1.0)
+
+
+def test_parse_fault_weights_mapping() -> None:
+    assert main.parse_fault_weights_mapping({"500": 0.3, 429: 0.2}) == ((500, 0.3), (429, 0.2))
 
 
 def test_successful_forwarding(monkeypatch) -> None:
