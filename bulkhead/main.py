@@ -8,11 +8,13 @@ import signal
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
 import typer
 import uvicorn
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -147,10 +149,46 @@ def parse_fault_weights(raw: str) -> tuple[tuple[int, float], ...]:
     return tuple(weights)
 
 
+def parse_fault_weights_mapping(raw: dict[Any, Any]) -> tuple[tuple[int, float], ...]:
+    parts = []
+    for key, value in raw.items():
+        parts.append(f"{int(key)}={float(value)}")
+    return parse_fault_weights(",".join(parts))
+
+
+def maybe_load_config(path: str | None) -> dict[str, Any]:
+    candidate = Path(path) if path else Path("config.yaml")
+    if not candidate.exists():
+        return {}
+    with candidate.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise typer.BadParameter("Config file must contain a top-level mapping.")
+    return data
+
+
 def resolve_scenario(name: str) -> dict[str, Any]:
     if name not in SCENARIOS:
         raise typer.BadParameter(f"Unknown scenario '{name}'. Available: {', '.join(SCENARIOS)}")
     return SCENARIOS[name]
+
+
+def choose(value: Any, fallback: Any) -> Any:
+    if value == "":
+        return fallback
+    return fallback if value is None else value
+
+
+def has_cli_overrides(**values: Any) -> bool:
+    return any(value not in (None, "") for value in values.values())
+
+
+def validate_latency_range(latency_min: float, latency_max: float) -> tuple[float, float]:
+    if latency_min < 0 or latency_max < 0:
+        raise typer.BadParameter("Latency values must be >= 0.")
+    if latency_min > latency_max:
+        raise typer.BadParameter("--latency-min must be <= --latency-max.")
+    return latency_min, latency_max
 
 
 def mock_completion() -> dict[str, Any]:
@@ -326,44 +364,99 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, handle_signal)
 
 
-@cli.command()
+@cli.command(
+    help=(
+        "Start Bulkhead.\n\n"
+        "If --config is omitted, Bulkhead looks for ./config.yaml.\n"
+        "Examples:\n"
+        "  bulkhead start --mode mock --scenario mixed-transient\n"
+        "  bulkhead start --mode proxy --upstream-url https://api.openai.com --scenario mixed-transient\n"
+        "  bulkhead start --config bulkhead.yaml"
+    )
+)
 def start(
-    mode: str = typer.Option("proxy", help="proxy forwards to a real upstream, mock returns fake successes."),
-    upstream_url: str = typer.Option("", help="OpenAI-compatible upstream base URL, without /v1."),
-    scenario: str = typer.Option("mixed-transient", help="Built-in fault scenario."),
-    fail_rate: float = typer.Option(0.1, help="Probability of injecting a fault before success/forwarding."),
-    faults: str = typer.Option("", help="Absolute per-code rates, e.g. 500=0.3,429=0.2."),
-    error_codes: str = typer.Option(
-        "",
+    config_path: str | None = typer.Option(None, "--config", help="Optional YAML config path. Defaults to ./config.yaml if present."),
+    mode: str | None = typer.Option(None, help="proxy forwards to a real upstream, mock returns fake successes."),
+    upstream_url: str | None = typer.Option(None, help="OpenAI-compatible upstream base URL, without /v1."),
+    scenario: str | None = typer.Option(None, help="Built-in fault scenario."),
+    fail_rate: float | None = typer.Option(None, help="Probability of injecting a fault before success/forwarding."),
+    faults: str | None = typer.Option(None, help="Absolute per-code rates, e.g. 500=0.3,429=0.2."),
+    error_codes: str | None = typer.Option(
+        None,
         help="Comma-separated injected status codes. Supported: 400,401,403,404,413,429,500,503.",
     ),
     latency_p: float | None = typer.Option(None, help="Probability of injecting latency before forwarding."),
-    latency_min: float = typer.Option(5.0, help="Minimum injected latency in seconds."),
-    latency_max: float = typer.Option(15.0, help="Maximum injected latency in seconds."),
+    latency_min: float | None = typer.Option(None, help="Minimum injected latency in seconds."),
+    latency_max: float | None = typer.Option(None, help="Maximum injected latency in seconds."),
     seed: int | None = typer.Option(None, help="Optional deterministic random seed."),
     port: int = typer.Option(PORT, help="Port to bind Bulkhead on."),
 ) -> None:
     global config
-    if mode not in {"proxy", "mock"}:
-        raise typer.BadParameter("mode must be 'proxy' or 'mock'")
-    if mode == "proxy" and not upstream_url:
-        raise typer.BadParameter("--upstream-url is required in proxy mode.")
-
-    scenario_config = resolve_scenario(scenario)
-    fault_weights = parse_fault_weights(faults) if faults else ()
-    resolved_error_codes = parse_error_codes(error_codes) if error_codes else scenario_config["error_codes"]
-    resolved_latency_p = scenario_config["latency_p"] if latency_p is None else latency_p
-    resolved_fail_rate = sum(weight for _, weight in fault_weights) if fault_weights else fail_rate
-    config = Config(
+    file_config = maybe_load_config(config_path)
+    if not file_config and not has_cli_overrides(
         mode=mode,
         upstream_url=upstream_url,
+        scenario=scenario,
+        fail_rate=fail_rate,
+        faults=faults,
+        error_codes=error_codes,
+        latency_p=latency_p,
+        latency_min=latency_min,
+        latency_max=latency_max,
+        seed=seed,
+    ):
+        raise typer.BadParameter(
+            "No config.yaml found and no CLI settings were provided. "
+            "Create config.yaml, pass --config, or run with explicit flags such as "
+            "--mode mock --scenario mixed-transient."
+        )
+
+    resolved_mode = choose(mode, file_config.get("mode", "proxy"))
+    resolved_upstream_url = choose(upstream_url, file_config.get("upstream_url", ""))
+    resolved_scenario_name = choose(scenario, file_config.get("scenario", "mixed-transient"))
+    resolved_latency_min = choose(latency_min, file_config.get("latency_min", 5.0))
+    resolved_latency_max = choose(latency_max, file_config.get("latency_max", 15.0))
+    resolved_seed = choose(seed, file_config.get("seed"))
+
+    if resolved_mode not in {"proxy", "mock"}:
+        raise typer.BadParameter("mode must be 'proxy' or 'mock'")
+    if resolved_mode == "proxy" and not resolved_upstream_url:
+        raise typer.BadParameter("--upstream-url is required in proxy mode.")
+
+    scenario_config = resolve_scenario(resolved_scenario_name)
+
+    raw_faults = choose(faults, file_config.get("faults"))
+    if isinstance(raw_faults, dict):
+        fault_weights = parse_fault_weights_mapping(raw_faults)
+    elif raw_faults:
+        fault_weights = parse_fault_weights(str(raw_faults))
+    else:
+        fault_weights = ()
+
+    raw_error_codes = choose(error_codes, file_config.get("error_codes"))
+    if isinstance(raw_error_codes, list):
+        resolved_error_codes = parse_error_codes(",".join(str(code) for code in raw_error_codes))
+    elif raw_error_codes:
+        resolved_error_codes = parse_error_codes(str(raw_error_codes))
+    else:
+        resolved_error_codes = scenario_config["error_codes"]
+
+    resolved_latency_p = choose(latency_p, file_config.get("latency_p", scenario_config["latency_p"]))
+    resolved_latency_min, resolved_latency_max = validate_latency_range(resolved_latency_min, resolved_latency_max)
+    resolved_fail_rate = sum(weight for _, weight in fault_weights) if fault_weights else choose(
+        fail_rate, file_config.get("fail_rate", 0.1)
+    )
+
+    config = Config(
+        mode=resolved_mode,
+        upstream_url=resolved_upstream_url,
         fail_rate=clamp_probability(resolved_fail_rate),
         error_codes=resolved_error_codes,
         fault_weights=fault_weights,
         latency_p=clamp_probability(resolved_latency_p),
-        latency_min=latency_min,
-        latency_max=latency_max,
-        seed=seed,
+        latency_min=resolved_latency_min,
+        latency_max=resolved_latency_max,
+        seed=resolved_seed,
     )
     if config.seed is not None:
         random.seed(config.seed)
