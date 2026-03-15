@@ -1,4 +1,6 @@
 .venv/
-bulkhead.egg-info/
+*.egg-info/
 __pycache__/
 .pytest_cache/
+build/
+dist/
