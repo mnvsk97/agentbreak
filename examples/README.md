@@ -2,6 +2,8 @@
 
 Two tiny examples are included so you can point real agent code at Bulkhead immediately.
 
+Both examples can send more than one request. Set `request_count` in [config.example.yaml](/Users/saikrishna/tfy/bulkhead/config.example.yaml) via your local `config.yaml`, or override it with `BULKHEAD_REQUEST_COUNT`.
+
 ## 1. Simple LangChain agent
 
 ```bash
