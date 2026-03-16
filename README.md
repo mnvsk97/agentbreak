@@ -55,7 +55,7 @@ your app -> AgentBreak -> fake response / injected failure
 
 ## Real Provider Mode
 
-If you want real upstream calls plus injected failures:
+If you want real upstream calls plus randomly injected failures:
 
 ```bash
 agentbreak start \
@@ -70,6 +70,27 @@ Then keep your app pointed at:
 ```bash
 export OPENAI_BASE_URL=http://localhost:5000/v1
 ```
+
+## Why This Matters
+
+Even major hosted providers have non-zero downtime.
+
+- [OpenAI Status](https://status.openai.com/)
+- [Claude Status](https://status.claude.com/)
+
+As of March 15, 2026, the official status pages report roughly:
+
+- OpenAI APIs: `99.76%` uptime over the last 90 days
+- Anthropic API: `99.4%` uptime over the last 90 days
+
+Inference:
+
+- `99.76%` uptime annualizes to about `21` hours of downtime per year
+- `99.4%` uptime annualizes to about `53` hours of downtime per year
+
+Self-hosted systems often have more moving parts to break: your own gateway, networking, autoscaling, auth, rate limiting, queues, and model serving stack. In practice, that can fail more often than a top-tier managed API.
+
+That is why resilience testing matters. You want to know whether your agent retries correctly, falls back correctly, avoids loops, and degrades gracefully before a real outage or brownout happens.
 
 ## What It Supports
 
