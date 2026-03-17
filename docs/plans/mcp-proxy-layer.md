@@ -67,13 +67,13 @@ MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interac
 
 ### Task 5: Implement MCP proxy mode with upstream forwarding
 
-- [ ] Add support for stdio transport to upstream MCP server
-- [ ] Add support for SSE transport to upstream MCP server
-- [ ] Implement request forwarding with header filtering
-- [ ] Handle streaming responses for tools/call results
-- [ ] Track upstream successes and failures
-- [ ] Add timeout handling for slow upstream servers
-- [ ] Add integration tests with real MCP server
+- [x] Add support for stdio transport to upstream MCP server
+- [x] Add support for SSE transport to upstream MCP server
+- [x] Implement request forwarding with header filtering
+- [x] Handle streaming responses for tools/call results
+- [x] Track upstream successes and failures
+- [x] Add timeout handling for slow upstream servers
+- [x] Add integration tests with real MCP server
 
 ### Task 6: Add MCP configuration support
 

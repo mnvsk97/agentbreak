@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,6 +15,7 @@ from agentbreak.mcp_protocol import (
     INVALID_REQUEST,
     MCP_TOOL_ERROR,
     METHOD_NOT_FOUND,
+    MCPRequest,
     MCPResponse,
 )
 
@@ -510,6 +512,7 @@ def test_mock_custom_tools_config() -> None:
     custom_tool = {"name": "custom_tool", "description": "A custom tool.", "inputSchema": {"type": "object", "properties": {}}}
     mcp_proxy.mcp_config = mcp_proxy.MCPConfig(
         mode="mock",
+        fail_rate=0.0,
         mock_tools=(custom_tool,),
     )
     payload = json.dumps({"jsonrpc": "2.0", "id": 10, "method": "tools/list"}).encode()
@@ -525,6 +528,7 @@ def test_mock_custom_resources_config() -> None:
     custom_resource = {"uri": "s3://my-bucket/data.csv", "name": "Data", "mimeType": "text/csv"}
     mcp_proxy.mcp_config = mcp_proxy.MCPConfig(
         mode="mock",
+        fail_rate=0.0,
         mock_resources=(custom_resource,),
     )
     payload = json.dumps({"jsonrpc": "2.0", "id": 11, "method": "resources/list"}).encode()
@@ -533,3 +537,242 @@ def test_mock_custom_resources_config() -> None:
     resources = body["result"]["resources"]
     assert len(resources) == 1
     assert resources[0]["uri"] == "s3://my-bucket/data.csv"
+
+
+# ---------------------------------------------------------------------------
+# StdioTransportManager unit tests
+# ---------------------------------------------------------------------------
+
+class TestStdioTransportManager:
+    def test_requires_nonempty_command(self) -> None:
+        with pytest.raises(ValueError, match="upstream_command"):
+            mcp_proxy.StdioTransportManager(command=())
+
+    def test_sends_request_and_receives_response(self) -> None:
+        """Spawn a real Python subprocess that echoes JSON-RPC responses."""
+        echo_server = (
+            "import sys, json\n"
+            "for line in sys.stdin:\n"
+            "    req = json.loads(line)\n"
+            "    resp = {'jsonrpc': '2.0', 'id': req.get('id'), 'result': {'echo': True}}\n"
+            "    sys.stdout.write(json.dumps(resp) + '\\n')\n"
+            "    sys.stdout.flush()\n"
+        )
+
+        async def _run() -> None:
+            transport = mcp_proxy.StdioTransportManager(
+                command=("python", "-c", echo_server),
+                timeout=10.0,
+            )
+            req = MCPRequest(method="tools/list", id=42)
+            result = await transport.send_request(req)
+            assert result["id"] == 42
+            assert result["result"]["echo"] is True
+            await transport.stop()
+
+        asyncio.run(_run())
+
+    def test_timeout_raises_timeout_error(self) -> None:
+        """Subprocess that never responds should raise TimeoutError."""
+        blocking_server = "import time; time.sleep(60)\n"
+
+        async def _run() -> None:
+            transport = mcp_proxy.StdioTransportManager(
+                command=("python", "-c", blocking_server),
+                timeout=0.1,
+            )
+            req = MCPRequest(method="tools/list", id=1)
+            with pytest.raises(TimeoutError):
+                await transport.send_request(req)
+            await transport.stop()
+
+        asyncio.run(_run())
+
+    def test_subprocess_restart_after_exit(self) -> None:
+        """After subprocess exits, a new one should start on next request."""
+        echo_server = (
+            "import sys, json\n"
+            "line = sys.stdin.readline()\n"
+            "req = json.loads(line)\n"
+            "resp = {'jsonrpc': '2.0', 'id': req.get('id'), 'result': {'pong': True}}\n"
+            "sys.stdout.write(json.dumps(resp) + '\\n')\n"
+            "sys.stdout.flush()\n"
+            # exits after one response
+        )
+
+        async def _run() -> None:
+            transport = mcp_proxy.StdioTransportManager(
+                command=("python", "-c", echo_server),
+                timeout=10.0,
+            )
+            r1 = await transport.send_request(MCPRequest(method="ping", id=1))
+            assert r1["result"]["pong"] is True
+            # Process has exited; next request should restart it.
+            r2 = await transport.send_request(MCPRequest(method="ping", id=2))
+            assert r2["result"]["pong"] is True
+            await transport.stop()
+
+        asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Proxy mode — stdio transport (integration with FastAPI TestClient)
+# ---------------------------------------------------------------------------
+
+def _reset_with_stdio(command: tuple[str, ...], timeout: float = 10.0) -> None:
+    mcp_proxy.mcp_config = mcp_proxy.MCPConfig(
+        mode="proxy",
+        upstream_transport="stdio",
+        upstream_command=command,
+        upstream_timeout=timeout,
+        fail_rate=0.0,
+        latency_p=0.0,
+    )
+    mcp_proxy.mcp_stats = mcp_proxy.MCPStats()
+    mcp_proxy._stdio_transport = None
+    mcp_proxy._sse_transport = None
+
+
+def test_proxy_stdio_forwards_request() -> None:
+    """End-to-end: proxy in stdio mode forwards request to a real subprocess."""
+    echo_server = (
+        "import sys, json\n"
+        "for line in sys.stdin:\n"
+        "    req = json.loads(line)\n"
+        "    resp = {'jsonrpc': '2.0', 'id': req.get('id'), 'result': {'tools': []}}\n"
+        "    sys.stdout.write(json.dumps(resp) + '\\n')\n"
+        "    sys.stdout.flush()\n"
+    )
+    _reset_with_stdio(command=("python", "-c", echo_server))
+    payload = json.dumps({"jsonrpc": "2.0", "id": 7, "method": "tools/list"}).encode()
+    resp = client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["result"]["tools"] == []
+    assert mcp_proxy.mcp_stats.upstream_successes == 1
+
+
+def test_proxy_stdio_timeout_returns_error() -> None:
+    """When stdio subprocess hangs, proxy returns an MCP error response."""
+    blocking_server = "import time; time.sleep(60)\n"
+    _reset_with_stdio(command=("python", "-c", blocking_server), timeout=0.1)
+    payload = json.dumps({"jsonrpc": "2.0", "id": 8, "method": "tools/list"}).encode()
+    resp = client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == mcp_proxy.INTERNAL_ERROR
+    assert mcp_proxy.mcp_stats.upstream_failures == 1
+
+
+def test_proxy_stdio_bad_command_returns_error() -> None:
+    """If the stdio command cannot be started, proxy returns an MCP error."""
+    _reset_with_stdio(command=("nonexistent_binary_xyz",))
+    payload = json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}).encode()
+    resp = client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "error" in body
+    assert mcp_proxy.mcp_stats.upstream_failures == 1
+
+
+# ---------------------------------------------------------------------------
+# SSETransportManager unit tests
+# ---------------------------------------------------------------------------
+
+class TestSSETransportManager:
+    def test_requires_nonempty_base_url(self) -> None:
+        # Construction should succeed; failure only occurs on start().
+        mgr = mcp_proxy.SSETransportManager(base_url="http://localhost:9999")
+        assert mgr.base_url == "http://localhost:9999"
+
+    def test_timeout_when_sse_server_unavailable(self) -> None:
+        """If SSE server is not reachable, start() should raise RuntimeError."""
+        async def _run() -> None:
+            mgr = mcp_proxy.SSETransportManager(
+                base_url="http://127.0.0.1:19999",  # nothing listening here
+                timeout=0.1,
+            )
+            req = MCPRequest(method="tools/list", id=1)
+            with pytest.raises((RuntimeError, Exception)):
+                await mgr.send_request(req)
+            await mgr.stop()
+
+        asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# MCPConfig new fields
+# ---------------------------------------------------------------------------
+
+def test_mcp_config_defaults() -> None:
+    cfg = mcp_proxy.MCPConfig()
+    assert cfg.upstream_transport == "http"
+    assert cfg.upstream_command == ()
+    assert cfg.upstream_timeout == mcp_proxy.DEFAULT_UPSTREAM_TIMEOUT
+
+
+def test_mcp_config_stdio_transport() -> None:
+    cfg = mcp_proxy.MCPConfig(
+        mode="proxy",
+        upstream_transport="stdio",
+        upstream_command=("python", "server.py"),
+        upstream_timeout=60.0,
+    )
+    assert cfg.upstream_transport == "stdio"
+    assert cfg.upstream_command == ("python", "server.py")
+    assert cfg.upstream_timeout == 60.0
+
+
+# ---------------------------------------------------------------------------
+# HTTP proxy — timeout handling
+# ---------------------------------------------------------------------------
+
+def test_proxy_http_timeout_returns_error() -> None:
+    """httpx.TimeoutException from upstream is reported as an MCP error."""
+    reset_state(mode="proxy", upstream_url="http://upstream.example")
+
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(
+        side_effect=httpx.TimeoutException("timed out", request=None)
+    )
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        payload = json.dumps({"jsonrpc": "2.0", "id": 10, "method": "tools/list"}).encode()
+        resp = client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == mcp_proxy.INTERNAL_ERROR
+    assert mcp_proxy.mcp_stats.upstream_failures == 1
+
+
+# ---------------------------------------------------------------------------
+# Streaming response buffering (tools/call over HTTP)
+# ---------------------------------------------------------------------------
+
+def test_proxy_http_buffers_streaming_tool_result() -> None:
+    """Proxy correctly returns a tools/call result returned by upstream."""
+    reset_state(mode="proxy", upstream_url="http://upstream.example")
+    upstream_result = {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "result": {
+            "content": [{"type": "text", "text": "Hello from upstream tool"}],
+            "isError": False,
+        },
+    }
+    with patch("httpx.AsyncClient", return_value=_make_mock_async_client(upstream_result)):
+        payload = json.dumps({
+            "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+            "params": {"name": "greet", "arguments": {"name": "world"}},
+        }).encode()
+        resp = client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["result"]["content"][0]["text"] == "Hello from upstream tool"
+    assert mcp_proxy.mcp_stats.upstream_successes == 1
