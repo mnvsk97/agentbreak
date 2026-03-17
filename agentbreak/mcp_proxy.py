@@ -214,7 +214,7 @@ def record_mcp_request(mcp_req: MCPRequest, raw_body: bytes) -> None:
     seen = mcp_stats.seen_fingerprints[fp]
     if seen > 1:
         mcp_stats.duplicate_requests += 1
-    if seen == 3:
+    if seen > 2:
         mcp_stats.suspected_loops += 1
 
     if mcp_req.method == "tools/call":
@@ -282,6 +282,7 @@ async def _get_upstream_http_client() -> httpx.AsyncClient:
             timeout=mcp_config.upstream_timeout,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
+        mcp_stats.http_pool_size = 20
     return _upstream_http_client
 
 
@@ -859,7 +860,7 @@ def start(
 
     install_signal_handlers()
     try:
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
     finally:
         print_scorecard()
 
