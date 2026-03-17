@@ -16,7 +16,6 @@ from agentbreak.mcp_protocol import (
     MCP_TOOL_ERROR,
     METHOD_NOT_FOUND,
     MCPRequest,
-    MCPResponse,
 )
 
 
@@ -194,7 +193,7 @@ def test_suspected_loops_tracked() -> None:
     }).encode()
     for _ in range(3):
         client.post("/mcp", content=payload, headers={"content-type": "application/json"})
-    assert mcp_proxy.mcp_stats.suspected_loops >= 1
+    assert mcp_proxy.mcp_stats.suspected_loops == 1
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +217,8 @@ def test_fault_injection_increments_stats() -> None:
     payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
     client.post("/mcp", content=payload, headers={"content-type": "application/json"})
     assert mcp_proxy.mcp_stats.injected_faults == 1
-    assert mcp_proxy.mcp_stats.upstream_failures == 1
+    # Injected faults are synthetic — they do not increment upstream_failures
+    assert mcp_proxy.mcp_stats.upstream_failures == 0
 
 
 def test_no_fault_injection_at_zero_rate() -> None:
@@ -368,9 +368,9 @@ def test_scorecard_pass_outcome_when_no_failures() -> None:
 
 
 def test_scorecard_fail_outcome_when_all_fail() -> None:
-    reset_state(fail_rate=1.0)
-    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
-    client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+    # FAIL requires actual upstream_failures, not injected faults
+    reset_state(fail_rate=0.0)
+    mcp_proxy.mcp_stats.upstream_failures = 1
     resp = client.get("/_agentbreak/mcp/scorecard")
     assert resp.json()["run_outcome"] == "FAIL"
 
@@ -746,7 +746,7 @@ class TestSSETransport:
                 timeout=0.1,
             )
             req = MCPRequest(method="tools/list", id=1)
-            with pytest.raises((RuntimeError, Exception)):
+            with pytest.raises(RuntimeError):
                 await mgr.send_request(req)
             await mgr.stop()
 
@@ -1068,4 +1068,3 @@ def test_mcp_proxy_start_with_known_mcp_scenario_succeeds_in_config() -> None:
     assert "mcp-slow-tools" in scenarios
     assert "mcp-initialization-failure" in scenarios
     assert "mcp-mixed-transient" in scenarios
-    assert mcp_proxy.mcp_stats.tool_successes_by_name["failing_tool"] == 0

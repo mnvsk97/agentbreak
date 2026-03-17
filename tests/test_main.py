@@ -535,7 +535,7 @@ def test_start_command_with_mcp_slow_tools_scenario(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(main.uvicorn, "run", lambda *a, **kw: None)
     from typer.testing import CliRunner
     runner = CliRunner()
-    result = runner.invoke(
+    runner.invoke(
         main.cli,
         [
             "start",

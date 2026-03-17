@@ -373,7 +373,6 @@ def scorecard_data() -> dict[str, Any]:
     # Calculate requests per second
     elapsed = time.monotonic() - mcp_stats.session_start_time
     rps = round(mcp_stats.total_requests / elapsed, 2) if elapsed > 0 else 0.0
-    mcp_stats.requests_per_second = rps
     return {
         "requests_seen": mcp_stats.total_requests,
         "injected_faults": mcp_stats.injected_faults,
@@ -596,7 +595,6 @@ async def _process_single_mcp_request(
     if should_fault:
         error = pick_mcp_error()
         mcp_stats.injected_faults += 1
-        mcp_stats.upstream_failures += 1
         _record_method_outcome(mcp_req, False)
         elapsed = (time.monotonic() - start_time) * 1000
         mcp_stats.total_processing_time_ms += elapsed
@@ -682,6 +680,14 @@ async def proxy_mcp(request: Request) -> JSONResponse:
 
     # JSON-RPC 2.0 batch request: process all items concurrently.
     if isinstance(parsed, list):
+        # Empty batch is invalid per JSON-RPC 2.0 spec.
+        if not parsed:
+            return JSONResponse(
+                status_code=200,
+                content=mcp_error_response(
+                    None, MCPError(code=INVALID_REQUEST, message="Invalid Request: batch must not be empty")
+                ),
+            )
         tasks = [
             _process_single_mcp_request(item, json.dumps(item).encode(), request)
             for item in parsed
@@ -775,7 +781,10 @@ def start(
             value = item.strip()
             if not value:
                 continue
-            code = int(value)
+            try:
+                code = int(value)
+            except ValueError:
+                raise typer.BadParameter(f"Invalid fault code {value!r}: must be an integer.")
             if code not in SUPPORTED_FAULT_CODES:
                 raise typer.BadParameter(
                     f"Unsupported fault code {code}. Supported: {', '.join(str(c) for c in SUPPORTED_FAULT_CODES)}"

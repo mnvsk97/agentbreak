@@ -228,8 +228,18 @@ class SSETransport(MCPTransport):
         for _ in range(50):
             if self._endpoint_url is not None:
                 return
+            if self._sse_task is not None and self._sse_task.done() and not self._sse_task.cancelled():
+                task_exc = self._sse_task.exception()
+                self._started = False
+                await self._client.aclose()
+                self._client = None
+                if task_exc is not None:
+                    raise RuntimeError(f"SSE upstream connection failed: {task_exc}") from task_exc
+                raise RuntimeError("SSE listener task terminated unexpectedly")
             await asyncio.sleep(0.1)
         self._started = False
+        await self._client.aclose()
+        self._client = None
         raise RuntimeError(
             "SSE upstream did not send an endpoint URL within 5 seconds"
         )
@@ -239,6 +249,8 @@ class SSETransport(MCPTransport):
             await self.start()
         if self._endpoint_url is None:
             raise RuntimeError("SSE endpoint URL is not available")
+        if self._sse_task is not None and self._sse_task.done():
+            raise RuntimeError("SSE listener task has terminated; cannot send requests")
         assert self._client is not None
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()

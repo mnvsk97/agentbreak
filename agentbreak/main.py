@@ -603,6 +603,8 @@ def start(
         uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
     finally:
         print_scorecard()
+        if resolved_mcp_mode != "disabled":
+            _mcp_proxy.print_scorecard()
 
 
 def _register_mcp_subcommands() -> None:

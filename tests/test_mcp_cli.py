@@ -1,15 +1,11 @@
 """Tests for agentbreak mcp CLI subcommands: test, list-tools, call-tool."""
 from __future__ import annotations
 
-import asyncio
-import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
-from agentbreak import mcp_proxy
 from agentbreak.main import cli
 
 
@@ -76,7 +72,7 @@ class TestMcpTest:
             return response
 
         with patch("agentbreak.mcp_proxy._send_one_request", new=fake_send):
-            result = runner.invoke(cli, ["mcp", "test"])
+            runner.invoke(cli, ["mcp", "test"])
         assert captured == ["initialize"]
 
 

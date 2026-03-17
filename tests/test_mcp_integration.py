@@ -151,7 +151,9 @@ class TestFaultInjection:
     def test_fault_increments_injected_faults(self) -> None:
         _post("tools/call", {"name": "echo", "arguments": {}})
         assert mcp_proxy.mcp_stats.injected_faults == 1
-        assert mcp_proxy.mcp_stats.upstream_failures == 1
+        # Injected faults are not upstream failures — they are synthetic errors
+        # that never reached the upstream. upstream_failures should remain 0.
+        assert mcp_proxy.mcp_stats.upstream_failures == 0
 
     def test_fault_still_records_request(self) -> None:
         _post("tools/call", {"name": "echo", "arguments": {}})
@@ -216,8 +218,9 @@ class TestScorecardEndpoint:
         assert data["run_outcome"] == "PASS"
 
     def test_scorecard_outcome_fail_when_all_fail(self) -> None:
-        _reset(mode="mock", fail_rate=1.0, fault_codes=(500,))
-        _post("tools/call", {"name": "echo", "arguments": {}})
+        # FAIL requires actual upstream_failures (not injected faults, which are synthetic)
+        _reset(mode="mock", fail_rate=0.0)
+        mcp_proxy.mcp_stats.upstream_failures = 1
         data = client.get("/_agentbreak/mcp/scorecard").json()
         assert data["run_outcome"] == "FAIL"
 
@@ -233,7 +236,7 @@ class TestScorecardEndpoint:
         _reset(mode="mock", fail_rate=1.0, fault_codes=(500,))
         _post("tools/call", {"name": "echo", "arguments": {}})
         data = client.get("/_agentbreak/mcp/scorecard").json()
-        # 1 injected fault = -3, 1 upstream failure = -12 → score = 85
+        # 1 injected fault = -3 → score = 97
         assert data["resilience_score"] < 100
         assert data["resilience_score"] >= 0
 
