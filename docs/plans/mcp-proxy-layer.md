@@ -129,12 +129,12 @@ MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interac
 
 ### Task 11: Create example MCP applications
 
-- [ ] Create `examples/mcp_client/` with simple MCP client
-- [ ] Create example using `mcp` Python package
-- [ ] Demonstrate tool calling through proxy
-- [ ] Demonstrate resource reading through proxy
-- [ ] Add README with setup instructions
-- [ ] Add example showing retry logic on MCP errors
+- [x] Create `examples/mcp_client/` with simple MCP client
+- [x] Create example using `mcp` Python package
+- [x] Demonstrate tool calling through proxy
+- [x] Demonstrate resource reading through proxy
+- [x] Add README with setup instructions
+- [x] Add example showing retry logic on MCP errors
 
 ### Task 12: Update documentation and tests
 
