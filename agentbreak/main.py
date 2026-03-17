@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import random
+import shlex
 import signal
 import sys
 from collections import defaultdict
@@ -541,7 +542,7 @@ def start(
     if isinstance(resolved_mcp_upstream_command_raw, list):
         resolved_mcp_upstream_command: tuple[str, ...] = tuple(str(x) for x in resolved_mcp_upstream_command_raw)
     elif resolved_mcp_upstream_command_raw:
-        resolved_mcp_upstream_command = tuple(str(resolved_mcp_upstream_command_raw).split())
+        resolved_mcp_upstream_command = tuple(shlex.split(str(resolved_mcp_upstream_command_raw)))
     else:
         resolved_mcp_upstream_command = ()
 

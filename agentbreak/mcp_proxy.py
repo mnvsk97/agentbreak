@@ -214,7 +214,7 @@ def record_mcp_request(mcp_req: MCPRequest, raw_body: bytes) -> None:
     seen = mcp_stats.seen_fingerprints[fp]
     if seen > 1:
         mcp_stats.duplicate_requests += 1
-    if seen > 2:
+    if seen == 3:
         mcp_stats.suspected_loops += 1
 
     if mcp_req.method == "tools/call":
@@ -496,7 +496,7 @@ async def _forward_http(
             ),
         )
 
-    if response.status_code < 400:
+    if response.status_code < 300:
         mcp_stats.upstream_successes += 1
     else:
         mcp_stats.upstream_failures += 1
@@ -723,6 +723,9 @@ async def proxy_mcp(request: Request) -> JSONResponse:
             for (item, _), resp in zip(items_to_process, responses)
             if isinstance(item, dict) and "id" in item
         ]
+        if not non_notification_responses:
+            # Per JSON-RPC 2.0: if batch contained only notifications, return no response.
+            return Response(status_code=200)
         return JSONResponse(status_code=200, content=non_notification_responses)
 
     # Per JSON-RPC 2.0, notifications (requests with no "id") must not receive a response.
