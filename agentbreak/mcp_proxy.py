@@ -124,6 +124,9 @@ class MCPConfig:
     mock_prompts: tuple[dict[str, Any], ...] = _DEFAULT_MOCK_PROMPTS
     # TTL (seconds) for caching list-style responses (resources/list, tools/list, etc.)
     cache_ttl: float = 60.0
+    # Optional method filters: if set, fault/latency injection only applies to listed methods.
+    fault_methods: tuple[str, ...] | None = None
+    latency_methods: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -616,7 +619,8 @@ async def _process_single_mcp_request(
 
     # Phase 2: Fault injection check
     fault_check_start = time.monotonic()
-    should_fault = should_inject(mcp_config.fail_rate)
+    method_faultable = mcp_config.fault_methods is None or mcp_req.method in mcp_config.fault_methods
+    should_fault = method_faultable and should_inject(mcp_config.fail_rate)
     mcp_stats.fault_check_time_ms += (time.monotonic() - fault_check_start) * 1000
 
     if should_fault:
@@ -627,7 +631,9 @@ async def _process_single_mcp_request(
         mcp_stats.total_processing_time_ms += elapsed
         return mcp_error_response(mcp_req.id, error)
 
-    await maybe_delay()
+    method_delayable = mcp_config.latency_methods is None or mcp_req.method in mcp_config.latency_methods
+    if method_delayable:
+        await maybe_delay()
 
     # Phase 3: Cache lookup (for cacheable methods)
     cache_start = time.monotonic()

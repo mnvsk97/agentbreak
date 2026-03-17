@@ -50,6 +50,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "mcp_fail_rate": 0.0,
         "mcp_error_codes": DEFAULT_ERROR_CODES,
         "mcp_latency_p": 0.9,
+        "mcp_latency_methods": ("tools/call",),
     },
     "mcp-initialization-failure": {
         "error_codes": DEFAULT_ERROR_CODES,
@@ -57,6 +58,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "mcp_fail_rate": 0.5,
         "mcp_error_codes": (500, 503),
         "mcp_latency_p": 0.0,
+        "mcp_fault_methods": ("initialize",),
     },
     "mcp-mixed-transient": {
         "error_codes": DEFAULT_ERROR_CODES,
@@ -87,6 +89,8 @@ class Config:
     mcp_fail_rate: float = 0.1
     mcp_error_codes: tuple[int, ...] = DEFAULT_ERROR_CODES
     mcp_latency_p: float = 0.0
+    mcp_fault_methods: tuple[str, ...] | None = None
+    mcp_latency_methods: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -567,6 +571,15 @@ def start(
         mcp_latency_p, file_config.get("mcp_latency_p", scenario_config.get("mcp_latency_p", 0.0))
     )
 
+    raw_mcp_fault_methods = file_config.get("mcp_fault_methods", scenario_config.get("mcp_fault_methods"))
+    resolved_mcp_fault_methods: tuple[str, ...] | None = (
+        tuple(raw_mcp_fault_methods) if raw_mcp_fault_methods is not None else None
+    )
+    raw_mcp_latency_methods = file_config.get("mcp_latency_methods", scenario_config.get("mcp_latency_methods"))
+    resolved_mcp_latency_methods: tuple[str, ...] | None = (
+        tuple(raw_mcp_latency_methods) if raw_mcp_latency_methods is not None else None
+    )
+
     config = Config(
         mode=resolved_mode,
         upstream_url=resolved_upstream_url,
@@ -584,6 +597,8 @@ def start(
         mcp_fail_rate=clamp_probability(resolved_mcp_fail_rate),
         mcp_error_codes=resolved_mcp_error_codes,
         mcp_latency_p=clamp_probability(resolved_mcp_latency_p),
+        mcp_fault_methods=resolved_mcp_fault_methods,
+        mcp_latency_methods=resolved_mcp_latency_methods,
     )
     if config.seed is not None:
         random.seed(config.seed)
@@ -600,6 +615,8 @@ def start(
             latency_min=resolved_latency_min,
             latency_max=resolved_latency_max,
             seed=resolved_seed,
+            fault_methods=resolved_mcp_fault_methods,
+            latency_methods=resolved_mcp_latency_methods,
         )
         _mcp_proxy.mcp_stats = _mcp_proxy.MCPStats()
         _mcp_proxy._stdio_transport = None

@@ -72,9 +72,12 @@ class MCPRequest:
         params = raw.get("params")
         if params is not None and not isinstance(params, dict):
             raise ValueError("'params' must be an object (dict)")
+        req_id = raw.get("id")
+        if req_id is not None and not isinstance(req_id, (str, int, float)):
+            raise ValueError(f"'id' must be a string, number, or null, got {type(req_id).__name__}")
         return cls(
             method=str(raw["method"]),
-            id=raw.get("id"),
+            id=req_id,
             params=params,
         )
 
