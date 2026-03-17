@@ -218,7 +218,7 @@ def record_mcp_request(mcp_req: MCPRequest, raw_body: bytes) -> None:
 
     if mcp_req.method == "tools/call":
         mcp_stats.tool_calls += 1
-    elif mcp_req.method in ("resources/read", "resources/list"):
+    elif mcp_req.method == "resources/read":
         mcp_stats.resource_reads += 1
     elif mcp_req.method == "initialize":
         mcp_stats.init_requests += 1
@@ -735,6 +735,7 @@ def start(
     latency_p: float | None = typer.Option(None, help="Probability of injecting latency."),
     latency_min: float = typer.Option(5.0, help="Minimum injected latency in seconds."),
     latency_max: float = typer.Option(15.0, help="Maximum injected latency in seconds."),
+    fault_codes: str | None = typer.Option(None, help="Comma-separated HTTP-style codes for fault injection. Supported: 400,401,403,404,413,429,500,503."),
     seed: int | None = typer.Option(None, help="Optional deterministic random seed."),
     port: int = typer.Option(PORT, help="Port to bind the MCP proxy on."),
 ) -> None:
@@ -766,7 +767,23 @@ def start(
 
     resolved_fail_rate = fail_rate if fail_rate is not None else float(scenario_config.get("mcp_fail_rate", 0.1))
     resolved_latency_p = latency_p if latency_p is not None else float(scenario_config.get("mcp_latency_p", 0.0))
-    resolved_fault_codes: tuple[int, ...] = scenario_config.get("mcp_error_codes", DEFAULT_FAULT_CODES)
+    if fault_codes is not None:
+        parsed: list[int] = []
+        for item in fault_codes.split(","):
+            value = item.strip()
+            if not value:
+                continue
+            code = int(value)
+            if code not in SUPPORTED_FAULT_CODES:
+                raise typer.BadParameter(
+                    f"Unsupported fault code {code}. Supported: {', '.join(str(c) for c in SUPPORTED_FAULT_CODES)}"
+                )
+            parsed.append(code)
+        if not parsed:
+            raise typer.BadParameter("At least one fault code is required.")
+        resolved_fault_codes: tuple[int, ...] = tuple(parsed)
+    else:
+        resolved_fault_codes = scenario_config.get("mcp_error_codes", DEFAULT_FAULT_CODES)
 
     mcp_config = MCPConfig(
         mode=mode,

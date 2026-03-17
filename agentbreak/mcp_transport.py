@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -201,8 +202,8 @@ class SSETransport(MCPTransport):
                                 future = self._pending.pop(req_id, None)
                                 if future is not None and not future.done():
                                     future.set_result(msg)
-                            except json.JSONDecodeError:
-                                pass
+                            except json.JSONDecodeError as exc:
+                                print(f"AgentBreak SSE: malformed JSON from upstream, ignoring message: {exc}", file=sys.stderr)
                         event_type = ""
         except Exception as exc:
             for future in list(self._pending.values()):
