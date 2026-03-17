@@ -110,13 +110,13 @@ MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interac
 
 ### Task 9: Add MCP transport layer abstraction
 
-- [ ] Create `agentbreak/mcp_transport.py` with transport interface
-- [ ] Implement `StdioTransport` for stdio-based MCP servers
-- [ ] Implement `SSETransport` for SSE-based MCP servers
-- [ ] Implement `HTTPTransport` for HTTP-based MCP servers
-- [ ] Handle connection lifecycle: start, stop, reconnect
-- [ ] Add timeout and error handling for each transport
-- [ ] Add integration tests for each transport type
+- [x] Create `agentbreak/mcp_transport.py` with transport interface
+- [x] Implement `StdioTransport` for stdio-based MCP servers
+- [x] Implement `SSETransport` for SSE-based MCP servers
+- [x] Implement `HTTPTransport` for HTTP-based MCP servers
+- [x] Handle connection lifecycle: start, stop, reconnect
+- [x] Add timeout and error handling for each transport
+- [x] Add integration tests for each transport type
 
 ### Task 10: Create MCP proxy CLI commands
 
