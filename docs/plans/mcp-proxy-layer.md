@@ -120,12 +120,12 @@ MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interac
 
 ### Task 10: Create MCP proxy CLI commands
 
-- [ ] Add `agentbreak mcp start` subcommand
-- [ ] Add `agentbreak mcp test` subcommand to test MCP server connectivity
-- [ ] Add `agentbreak mcp list-tools` to query available tools from upstream
-- [ ] Add `agentbreak mcp call-tool` to manually invoke a tool through proxy
-- [ ] Update help text and documentation
-- [ ] Add examples for each command in README
+- [x] Add `agentbreak mcp start` subcommand
+- [x] Add `agentbreak mcp test` subcommand to test MCP server connectivity
+- [x] Add `agentbreak mcp list-tools` to query available tools from upstream
+- [x] Add `agentbreak mcp call-tool` to manually invoke a tool through proxy
+- [x] Update help text and documentation
+- [x] Add examples for each command in README
 
 ### Task 11: Create example MCP applications
 

@@ -29,6 +29,7 @@ from agentbreak.mcp_transport import (
     DEFAULT_TRANSPORT_TIMEOUT,
     SSETransport,
     StdioTransport,
+    create_transport,
 )
 # Import SCENARIOS lazily to avoid circular import issues at module level.
 # main.py does not import mcp_proxy, so this is safe at call time.
@@ -622,6 +623,170 @@ def start(
         uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
     finally:
         print_scorecard()
+
+
+async def _send_one_request(
+    method: str,
+    params: dict[str, Any] | None,
+    transport_type: str,
+    url: str,
+    command: tuple[str, ...],
+    timeout: float,
+) -> dict[str, Any]:
+    """Send a single MCP request using the given transport and return the raw response dict."""
+    t = create_transport(
+        transport_type,
+        base_url=url,
+        command=command,
+        timeout=timeout,
+    )
+    req = MCPRequest(method=method, id=1, params=params)
+    try:
+        await t.start()
+        result = await t.send_request(req)
+    finally:
+        await t.stop()
+    return result
+
+
+@cli.command(
+    "test",
+    help=(
+        "Test connectivity to an MCP server.\n\n"
+        "Sends an 'initialize' request and reports success or failure.\n\n"
+        "Examples:\n"
+        "  agentbreak mcp test\n"
+        "  agentbreak mcp test --url http://localhost:8080\n"
+        "  agentbreak mcp test --transport stdio --command 'python server.py'"
+    ),
+)
+def test_connectivity(
+    url: str = typer.Option("http://localhost:5001", help="MCP server URL (http/sse transports)."),
+    transport: str = typer.Option("http", help="Transport: http, stdio, or sse."),
+    command: list[str] = typer.Option([], help="Command for stdio transport."),
+    timeout: float = typer.Option(DEFAULT_UPSTREAM_TIMEOUT, help="Request timeout in seconds."),
+) -> None:
+    if transport not in {"http", "stdio", "sse"}:
+        raise typer.BadParameter("transport must be 'http', 'stdio', or 'sse'.")
+    if transport == "stdio" and not command:
+        raise typer.BadParameter("--command is required for stdio transport.")
+    if transport in {"http", "sse"} and not url:
+        raise typer.BadParameter("--url is required for http and sse transports.")
+    params: dict[str, Any] = {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "agentbreak", "version": "1.0"},
+    }
+    try:
+        result = asyncio.run(
+            _send_one_request("initialize", params, transport, url, tuple(command), timeout)
+        )
+    except (TimeoutError, RuntimeError, OSError) as exc:
+        typer.echo(f"Connection failed: {exc}", err=True)
+        raise typer.Exit(1)
+    if "error" in result:
+        err = result["error"]
+        typer.echo(f"Server returned error: {err.get('message', err)}", err=True)
+        raise typer.Exit(1)
+    server_info = (result.get("result") or {}).get("serverInfo", {})
+    name = server_info.get("name", "unknown")
+    version = server_info.get("version", "unknown")
+    typer.echo(f"OK  server={name}  version={version}")
+
+
+@cli.command(
+    "list-tools",
+    help=(
+        "List available tools from an MCP server.\n\n"
+        "Examples:\n"
+        "  agentbreak mcp list-tools\n"
+        "  agentbreak mcp list-tools --url http://localhost:8080\n"
+        "  agentbreak mcp list-tools --transport stdio --command 'python server.py'"
+    ),
+)
+def list_tools(
+    url: str = typer.Option("http://localhost:5001", help="MCP server URL (http/sse transports)."),
+    transport: str = typer.Option("http", help="Transport: http, stdio, or sse."),
+    command: list[str] = typer.Option([], help="Command for stdio transport."),
+    timeout: float = typer.Option(DEFAULT_UPSTREAM_TIMEOUT, help="Request timeout in seconds."),
+) -> None:
+    if transport not in {"http", "stdio", "sse"}:
+        raise typer.BadParameter("transport must be 'http', 'stdio', or 'sse'.")
+    if transport == "stdio" and not command:
+        raise typer.BadParameter("--command is required for stdio transport.")
+    if transport in {"http", "sse"} and not url:
+        raise typer.BadParameter("--url is required for http and sse transports.")
+    try:
+        result = asyncio.run(
+            _send_one_request("tools/list", None, transport, url, tuple(command), timeout)
+        )
+    except (TimeoutError, RuntimeError, OSError) as exc:
+        typer.echo(f"Request failed: {exc}", err=True)
+        raise typer.Exit(1)
+    if "error" in result:
+        err = result["error"]
+        typer.echo(f"Server returned error: {err.get('message', err)}", err=True)
+        raise typer.Exit(1)
+    tools = (result.get("result") or {}).get("tools", [])
+    if not tools:
+        typer.echo("No tools available.")
+        return
+    for tool in tools:
+        name = tool.get("name", "?")
+        desc = tool.get("description", "")
+        typer.echo(f"  {name}  {desc}")
+
+
+@cli.command(
+    "call-tool",
+    help=(
+        "Call a tool through an MCP server.\n\n"
+        "Examples:\n"
+        '  agentbreak mcp call-tool echo --args \'{"text": "hello"}\'\n'
+        "  agentbreak mcp call-tool get_time --url http://localhost:8080"
+    ),
+)
+def call_tool(
+    tool_name: str = typer.Argument(help="Name of the tool to call."),
+    args: str = typer.Option("{}", help="Tool arguments as a JSON object string."),
+    url: str = typer.Option("http://localhost:5001", help="MCP server URL (http/sse transports)."),
+    transport: str = typer.Option("http", help="Transport: http, stdio, or sse."),
+    command: list[str] = typer.Option([], help="Command for stdio transport."),
+    timeout: float = typer.Option(DEFAULT_UPSTREAM_TIMEOUT, help="Request timeout in seconds."),
+) -> None:
+    if transport not in {"http", "stdio", "sse"}:
+        raise typer.BadParameter("transport must be 'http', 'stdio', or 'sse'.")
+    if transport == "stdio" and not command:
+        raise typer.BadParameter("--command is required for stdio transport.")
+    if transport in {"http", "sse"} and not url:
+        raise typer.BadParameter("--url is required for http and sse transports.")
+    try:
+        tool_args = json.loads(args)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"--args must be valid JSON: {exc}")
+    if not isinstance(tool_args, dict):
+        raise typer.BadParameter("--args must be a JSON object.")
+    params: dict[str, Any] = {"name": tool_name, "arguments": tool_args}
+    try:
+        result = asyncio.run(
+            _send_one_request("tools/call", params, transport, url, tuple(command), timeout)
+        )
+    except (TimeoutError, RuntimeError, OSError) as exc:
+        typer.echo(f"Request failed: {exc}", err=True)
+        raise typer.Exit(1)
+    if "error" in result:
+        err = result["error"]
+        typer.echo(f"Server returned error: {err.get('message', err)}", err=True)
+        raise typer.Exit(1)
+    content = (result.get("result") or {}).get("content", [])
+    if not content:
+        typer.echo(json.dumps(result.get("result") or result, indent=2))
+        return
+    for item in content:
+        if item.get("type") == "text":
+            typer.echo(item.get("text", ""))
+        else:
+            typer.echo(json.dumps(item, indent=2))
 
 
 if __name__ == "__main__":

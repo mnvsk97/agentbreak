@@ -135,6 +135,50 @@ OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://localhost:5000/v1 python main.py
 
 More examples: [examples/README.md](examples/README.md)
 
+## MCP Commands
+
+AgentBreak includes `agentbreak mcp` subcommands for working with MCP servers.
+
+### Start the MCP proxy
+
+```bash
+agentbreak mcp start --mode mock
+agentbreak mcp start --mode mock --scenario mcp-tool-failures
+agentbreak mcp start --mode proxy --upstream-url http://localhost:8080
+agentbreak mcp start --mode proxy --upstream-transport stdio --upstream-command 'python server.py'
+```
+
+The MCP proxy listens on port 5001 by default. Point MCP clients at `http://localhost:5001/mcp`.
+
+### Test MCP server connectivity
+
+```bash
+# Test the running AgentBreak MCP proxy
+agentbreak mcp test
+
+# Test a remote MCP server
+agentbreak mcp test --url http://localhost:8080
+
+# Test a stdio-based MCP server
+agentbreak mcp test --transport stdio --command 'python my_server.py'
+```
+
+### List available tools
+
+```bash
+agentbreak mcp list-tools
+agentbreak mcp list-tools --url http://localhost:8080
+agentbreak mcp list-tools --transport stdio --command 'python my_server.py'
+```
+
+### Call a tool
+
+```bash
+agentbreak mcp call-tool echo --args '{"text": "hello"}'
+agentbreak mcp call-tool get_time --url http://localhost:8080
+agentbreak mcp call-tool search --args '{"query": "test"}' --transport stdio --command 'python server.py'
+```
+
 ## MCP Scenarios
 
 AgentBreak includes built-in fault scenarios for MCP (Model Context Protocol) servers.

@@ -589,5 +589,13 @@ def start(
         print_scorecard()
 
 
+def _register_mcp_subcommands() -> None:
+    from agentbreak import mcp_proxy as _mcp_proxy_module  # noqa: PLC0415
+    cli.add_typer(_mcp_proxy_module.cli, name="mcp")
+
+
+_register_mcp_subcommands()
+
+
 if __name__ == "__main__":
     cli()
