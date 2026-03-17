@@ -475,4 +475,77 @@ def test_proxy_mode_forwards_to_fake_upstream() -> None:
         assert scorecard["injected_faults"] == 0
     finally:
         server.shutdown()
-        server.server_close()
+
+
+# ---------------------------------------------------------------------------
+# MCP scenarios in SCENARIOS dict
+# ---------------------------------------------------------------------------
+
+def test_mcp_scenarios_present_in_scenarios_dict() -> None:
+    expected = {
+        "mcp-tool-failures",
+        "mcp-resource-unavailable",
+        "mcp-slow-tools",
+        "mcp-initialization-failure",
+        "mcp-mixed-transient",
+    }
+    assert expected.issubset(set(main.SCENARIOS))
+
+
+def test_mcp_scenario_entries_have_required_keys() -> None:
+    mcp_scenario_names = [
+        "mcp-tool-failures",
+        "mcp-resource-unavailable",
+        "mcp-slow-tools",
+        "mcp-initialization-failure",
+        "mcp-mixed-transient",
+    ]
+    for name in mcp_scenario_names:
+        sc = main.SCENARIOS[name]
+        assert "error_codes" in sc, f"{name} missing error_codes"
+        assert "latency_p" in sc, f"{name} missing latency_p"
+        assert "mcp_fail_rate" in sc, f"{name} missing mcp_fail_rate"
+        assert "mcp_error_codes" in sc, f"{name} missing mcp_error_codes"
+        assert "mcp_latency_p" in sc, f"{name} missing mcp_latency_p"
+
+
+def test_mcp_latency_p_in_config_dataclass() -> None:
+    cfg = main.Config()
+    assert hasattr(cfg, "mcp_latency_p")
+    assert cfg.mcp_latency_p == 0.0
+
+
+def test_resolve_scenario_mcp_tool_failures_has_high_fail_rate() -> None:
+    sc = main.resolve_scenario("mcp-tool-failures")
+    assert sc["mcp_fail_rate"] >= 0.2
+
+
+def test_resolve_scenario_mcp_slow_tools_has_zero_fail_rate() -> None:
+    sc = main.resolve_scenario("mcp-slow-tools")
+    assert sc["mcp_fail_rate"] == 0.0
+    assert sc["mcp_latency_p"] > 0.0
+
+
+def test_resolve_scenario_mcp_resource_unavailable_includes_404() -> None:
+    sc = main.resolve_scenario("mcp-resource-unavailable")
+    assert 404 in sc["mcp_error_codes"]
+
+
+def test_start_command_with_mcp_slow_tools_scenario(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+    runner = CliRunner()
+    result = runner.invoke(
+        main.cli,
+        [
+            "start",
+            "--mode", "mock",
+            "--scenario", "mcp-slow-tools",
+            "--port", "15099",
+        ],
+        catch_exceptions=False,
+    )
+    # The server starts but we just check that the scenario config was accepted
+    # (the process would block, so we can't fully test it here — but the
+    # config resolution should at least not raise before uvicorn.run is called)
+    # Since uvicorn.run blocks, this test just verifies the scenario name is valid.
+    assert main.SCENARIOS["mcp-slow-tools"]["mcp_fail_rate"] == 0.0

@@ -135,6 +135,35 @@ OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://localhost:5000/v1 python main.py
 
 More examples: [examples/README.md](examples/README.md)
 
+## MCP Scenarios
+
+AgentBreak includes built-in fault scenarios for MCP (Model Context Protocol) servers.
+Use them with `--scenario` when starting the MCP proxy:
+
+```bash
+python -m agentbreak.mcp_proxy --mode mock --scenario mcp-tool-failures
+python -m agentbreak.mcp_proxy --mode mock --scenario mcp-resource-unavailable
+python -m agentbreak.mcp_proxy --mode mock --scenario mcp-slow-tools
+python -m agentbreak.mcp_proxy --mode mock --scenario mcp-initialization-failure
+python -m agentbreak.mcp_proxy --mode mock --scenario mcp-mixed-transient
+```
+
+Or with the main `agentbreak start` command when using `--mcp-mode`:
+
+```bash
+agentbreak start --mode mock --mcp-mode mock --scenario mcp-tool-failures
+```
+
+Available MCP scenarios:
+
+- `mcp-tool-failures` — 30% of all MCP requests fail with 429/500/503 errors, simulating flaky tool execution.
+- `mcp-resource-unavailable` — 50% of MCP requests fail with 404/503, simulating resources being offline.
+- `mcp-slow-tools` — 90% of MCP requests get latency injected (5–15s), simulating slow tool backends.
+- `mcp-initialization-failure` — 50% of MCP requests fail with 500/503, stress-testing initialization retry logic.
+- `mcp-mixed-transient` — 20% failure rate with 429/500/503 plus 10% latency injection, simulating real-world brownout.
+
+Point your MCP client at `http://localhost:5001/mcp` when running the standalone MCP proxy.
+
 ## Development
 
 Install locally in editable mode:

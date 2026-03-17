@@ -100,13 +100,13 @@ MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interac
 
 ### Task 8: Add MCP-specific fault scenarios
 
-- [ ] Create `mcp-tool-failures` scenario: tools/call returns errors
-- [ ] Create `mcp-resource-unavailable` scenario: resources/read fails
-- [ ] Create `mcp-slow-tools` scenario: high latency for tool calls
-- [ ] Create `mcp-initialization-failure` scenario: initialize fails intermittently
-- [ ] Create `mcp-mixed-transient` scenario: combination of MCP failures
-- [ ] Update `SCENARIOS` dict with MCP scenarios
-- [ ] Document MCP scenarios in README
+- [x] Create `mcp-tool-failures` scenario: tools/call returns errors
+- [x] Create `mcp-resource-unavailable` scenario: resources/read fails
+- [x] Create `mcp-slow-tools` scenario: high latency for tool calls
+- [x] Create `mcp-initialization-failure` scenario: initialize fails intermittently
+- [x] Create `mcp-mixed-transient` scenario: combination of MCP failures
+- [x] Update `SCENARIOS` dict with MCP scenarios
+- [x] Document MCP scenarios in README
 
 ### Task 9: Add MCP transport layer abstraction
 

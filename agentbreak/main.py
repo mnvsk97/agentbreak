@@ -28,6 +28,42 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     "provider-flaky": {"error_codes": (500, 503), "latency_p": 0.0},
     "non-retryable": {"error_codes": (400, 401, 403, 404, 413), "latency_p": 0.0},
     "brownout": {"error_codes": (429, 500, 503), "latency_p": 0.2},
+    # MCP-specific scenarios
+    "mcp-tool-failures": {
+        "error_codes": DEFAULT_ERROR_CODES,
+        "latency_p": 0.0,
+        "mcp_fail_rate": 0.3,
+        "mcp_error_codes": (429, 500, 503),
+        "mcp_latency_p": 0.0,
+    },
+    "mcp-resource-unavailable": {
+        "error_codes": DEFAULT_ERROR_CODES,
+        "latency_p": 0.0,
+        "mcp_fail_rate": 0.5,
+        "mcp_error_codes": (404, 503),
+        "mcp_latency_p": 0.0,
+    },
+    "mcp-slow-tools": {
+        "error_codes": DEFAULT_ERROR_CODES,
+        "latency_p": 0.0,
+        "mcp_fail_rate": 0.0,
+        "mcp_error_codes": DEFAULT_ERROR_CODES,
+        "mcp_latency_p": 0.9,
+    },
+    "mcp-initialization-failure": {
+        "error_codes": DEFAULT_ERROR_CODES,
+        "latency_p": 0.0,
+        "mcp_fail_rate": 0.5,
+        "mcp_error_codes": (500, 503),
+        "mcp_latency_p": 0.0,
+    },
+    "mcp-mixed-transient": {
+        "error_codes": DEFAULT_ERROR_CODES,
+        "latency_p": 0.0,
+        "mcp_fail_rate": 0.2,
+        "mcp_error_codes": (429, 500, 503),
+        "mcp_latency_p": 0.1,
+    },
 }
 
 
@@ -49,6 +85,7 @@ class Config:
     mcp_upstream_url: str = ""
     mcp_fail_rate: float = 0.1
     mcp_error_codes: tuple[int, ...] = DEFAULT_ERROR_CODES
+    mcp_latency_p: float = 0.0
 
 
 @dataclass
@@ -417,6 +454,7 @@ def start(
         "--mcp-error-codes",
         help="Comma-separated HTTP-style codes for MCP fault injection. Supported: 400,401,403,404,413,429,500,503.",
     ),
+    mcp_latency_p: float | None = typer.Option(None, "--mcp-latency-p", help="Probability of injecting latency into MCP requests."),
 ) -> None:
     global config
     file_config = maybe_load_config(config_path)
@@ -437,6 +475,7 @@ def start(
         mcp_upstream_command=mcp_upstream_command,
         mcp_fail_rate=mcp_fail_rate,
         mcp_error_codes=mcp_error_codes,
+        mcp_latency_p=mcp_latency_p,
     ):
         raise typer.BadParameter(
             "No config.yaml found and no CLI settings were provided. "
@@ -507,7 +546,9 @@ def start(
     if resolved_mcp_mode == "proxy" and resolved_mcp_upstream_transport == "stdio" and not resolved_mcp_upstream_command:
         raise typer.BadParameter("--mcp-upstream-command is required for stdio MCP transport.")
 
-    resolved_mcp_fail_rate = choose(mcp_fail_rate, file_config.get("mcp_fail_rate", 0.1))
+    resolved_mcp_fail_rate = choose(
+        mcp_fail_rate, file_config.get("mcp_fail_rate", scenario_config.get("mcp_fail_rate", 0.1))
+    )
 
     raw_mcp_error_codes = choose(mcp_error_codes, file_config.get("mcp_error_codes"))
     if isinstance(raw_mcp_error_codes, list):
@@ -515,7 +556,11 @@ def start(
     elif raw_mcp_error_codes:
         resolved_mcp_error_codes = parse_error_codes(str(raw_mcp_error_codes))
     else:
-        resolved_mcp_error_codes = DEFAULT_ERROR_CODES
+        resolved_mcp_error_codes = scenario_config.get("mcp_error_codes", DEFAULT_ERROR_CODES)
+
+    resolved_mcp_latency_p = choose(
+        mcp_latency_p, file_config.get("mcp_latency_p", scenario_config.get("mcp_latency_p", 0.0))
+    )
 
     config = Config(
         mode=resolved_mode,
@@ -533,6 +578,7 @@ def start(
         mcp_upstream_url=resolved_mcp_upstream_url,
         mcp_fail_rate=clamp_probability(resolved_mcp_fail_rate),
         mcp_error_codes=resolved_mcp_error_codes,
+        mcp_latency_p=clamp_probability(resolved_mcp_latency_p),
     )
     if config.seed is not None:
         random.seed(config.seed)

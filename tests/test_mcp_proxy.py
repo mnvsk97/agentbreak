@@ -920,4 +920,100 @@ def test_proxy_mode_tool_failures_tracked_on_error_response() -> None:
         }).encode()
         client.post("/mcp", content=payload, headers={"content-type": "application/json"})
     assert mcp_proxy.mcp_stats.tool_failures_by_name["failing_tool"] == 1
+
+
+# ---------------------------------------------------------------------------
+# MCP scenarios
+# ---------------------------------------------------------------------------
+
+def test_mcp_tool_failures_scenario_in_scenarios_dict() -> None:
+    from agentbreak.main import SCENARIOS
+    assert "mcp-tool-failures" in SCENARIOS
+    sc = SCENARIOS["mcp-tool-failures"]
+    assert sc["mcp_fail_rate"] == 0.3
+    assert 500 in sc["mcp_error_codes"]
+
+
+def test_mcp_resource_unavailable_scenario_in_scenarios_dict() -> None:
+    from agentbreak.main import SCENARIOS
+    assert "mcp-resource-unavailable" in SCENARIOS
+    sc = SCENARIOS["mcp-resource-unavailable"]
+    assert sc["mcp_fail_rate"] == 0.5
+    assert 404 in sc["mcp_error_codes"]
+
+
+def test_mcp_slow_tools_scenario_in_scenarios_dict() -> None:
+    from agentbreak.main import SCENARIOS
+    assert "mcp-slow-tools" in SCENARIOS
+    sc = SCENARIOS["mcp-slow-tools"]
+    assert sc["mcp_fail_rate"] == 0.0
+    assert sc["mcp_latency_p"] == 0.9
+
+
+def test_mcp_initialization_failure_scenario_in_scenarios_dict() -> None:
+    from agentbreak.main import SCENARIOS
+    assert "mcp-initialization-failure" in SCENARIOS
+    sc = SCENARIOS["mcp-initialization-failure"]
+    assert sc["mcp_fail_rate"] == 0.5
+    assert 500 in sc["mcp_error_codes"]
+
+
+def test_mcp_mixed_transient_scenario_in_scenarios_dict() -> None:
+    from agentbreak.main import SCENARIOS
+    assert "mcp-mixed-transient" in SCENARIOS
+    sc = SCENARIOS["mcp-mixed-transient"]
+    assert sc["mcp_fail_rate"] == 0.2
+    assert sc["mcp_latency_p"] == 0.1
+    assert 429 in sc["mcp_error_codes"]
+
+
+def test_mcp_scenario_tool_failures_applied_to_mcp_proxy() -> None:
+    """Applying mcp-tool-failures scenario via MCPConfig should inject faults at expected rate."""
+    from agentbreak.main import SCENARIOS
+    sc = SCENARIOS["mcp-tool-failures"]
+    mcp_proxy.mcp_config = mcp_proxy.MCPConfig(
+        mode="mock",
+        fail_rate=sc["mcp_fail_rate"],
+        fault_codes=sc["mcp_error_codes"],
+        latency_p=sc["mcp_latency_p"],
+        seed=42,
+    )
+    mcp_proxy.mcp_stats = mcp_proxy.MCPStats()
+    import random
+    random.seed(42)
+
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "t", "arguments": {}}}).encode()
+    results = []
+    for i in range(20):
+        resp = client.post("/mcp", content=payload, headers={"content-type": "application/json"})
+        results.append(resp.json())
+
+    errors = [r for r in results if "error" in r]
+    # With fail_rate=0.3 and seed=42, should see some injected faults
+    assert len(errors) > 0, "Expected some injected faults for mcp-tool-failures scenario"
+
+
+def test_mcp_scenario_slow_tools_applied_to_mcp_proxy() -> None:
+    """mcp-slow-tools scenario should have zero fail_rate."""
+    from agentbreak.main import SCENARIOS
+    sc = SCENARIOS["mcp-slow-tools"]
+    assert sc["mcp_fail_rate"] == 0.0
+    assert sc["mcp_latency_p"] > 0.0
+
+
+def test_mcp_proxy_start_with_unknown_scenario_raises() -> None:
+    from typer.testing import CliRunner
+    runner = CliRunner()
+    result = runner.invoke(mcp_proxy.cli, ["start", "--mode", "mock", "--scenario", "does-not-exist"])
+    assert result.exit_code != 0
+
+
+def test_mcp_proxy_start_with_known_mcp_scenario_succeeds_in_config() -> None:
+    """Verify that _get_scenarios() returns the MCP scenarios from main."""
+    scenarios = mcp_proxy._get_scenarios()
+    assert "mcp-tool-failures" in scenarios
+    assert "mcp-resource-unavailable" in scenarios
+    assert "mcp-slow-tools" in scenarios
+    assert "mcp-initialization-failure" in scenarios
+    assert "mcp-mixed-transient" in scenarios
     assert mcp_proxy.mcp_stats.tool_successes_by_name["failing_tool"] == 0

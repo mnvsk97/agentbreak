@@ -25,6 +25,11 @@ from agentbreak.mcp_protocol import (
     MCPResponse,
     fingerprint_mcp_request,
 )
+# Import SCENARIOS lazily to avoid circular import issues at module level.
+# main.py does not import mcp_proxy, so this is safe at call time.
+def _get_scenarios() -> dict[str, dict[str, Any]]:
+    from agentbreak.main import SCENARIOS  # noqa: PLC0415
+    return SCENARIOS
 
 PORT = 5001
 cli = typer.Typer(add_completion=False, help="MCP JSON-RPC 2.0 proxy with fault injection.")
@@ -712,6 +717,7 @@ def install_signal_handlers() -> None:
         "Start AgentBreak MCP proxy.\n\n"
         "Examples:\n"
         "  python -m agentbreak.mcp_proxy --mode mock --fail-rate 0.2\n"
+        "  python -m agentbreak.mcp_proxy --mode mock --scenario mcp-tool-failures\n"
         "  python -m agentbreak.mcp_proxy --mode proxy --upstream-url http://localhost:8080"
     )
 )
@@ -721,8 +727,9 @@ def start(
     upstream_transport: str = typer.Option("http", help="Transport to upstream: http, stdio, or sse."),
     upstream_command: list[str] = typer.Option([], help="Command (and args) for stdio transport, e.g. 'python server.py'."),
     upstream_timeout: float = typer.Option(DEFAULT_UPSTREAM_TIMEOUT, help="Timeout in seconds for upstream requests."),
-    fail_rate: float = typer.Option(0.1, help="Probability of injecting a fault."),
-    latency_p: float = typer.Option(0.0, help="Probability of injecting latency."),
+    scenario: str | None = typer.Option(None, help="Built-in MCP fault scenario name (e.g. mcp-tool-failures)."),
+    fail_rate: float | None = typer.Option(None, help="Probability of injecting a fault."),
+    latency_p: float | None = typer.Option(None, help="Probability of injecting latency."),
     latency_min: float = typer.Option(5.0, help="Minimum injected latency in seconds."),
     latency_max: float = typer.Option(15.0, help="Maximum injected latency in seconds."),
     seed: int | None = typer.Option(None, help="Optional deterministic random seed."),
@@ -745,14 +752,28 @@ def start(
     if upstream_timeout <= 0:
         raise typer.BadParameter("--upstream-timeout must be > 0.")
 
+    scenario_config: dict[str, Any] = {}
+    if scenario is not None:
+        scenarios = _get_scenarios()
+        if scenario not in scenarios:
+            raise typer.BadParameter(
+                f"Unknown scenario '{scenario}'. Available: {', '.join(scenarios)}"
+            )
+        scenario_config = scenarios[scenario]
+
+    resolved_fail_rate = fail_rate if fail_rate is not None else float(scenario_config.get("mcp_fail_rate", 0.1))
+    resolved_latency_p = latency_p if latency_p is not None else float(scenario_config.get("mcp_latency_p", 0.0))
+    resolved_fault_codes: tuple[int, ...] = scenario_config.get("mcp_error_codes", DEFAULT_FAULT_CODES)
+
     mcp_config = MCPConfig(
         mode=mode,
         upstream_url=upstream_url,
         upstream_transport=upstream_transport,
         upstream_command=tuple(upstream_command),
         upstream_timeout=upstream_timeout,
-        fail_rate=clamp_probability(fail_rate),
-        latency_p=clamp_probability(latency_p),
+        fail_rate=clamp_probability(resolved_fail_rate),
+        fault_codes=resolved_fault_codes,
+        latency_p=clamp_probability(resolved_latency_p),
         latency_min=latency_min,
         latency_max=latency_max,
         seed=seed,
