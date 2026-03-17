@@ -582,6 +582,22 @@ def start(
     )
     if config.seed is not None:
         random.seed(config.seed)
+    if resolved_mcp_mode != "disabled":
+        from agentbreak import mcp_proxy as _mcp_proxy  # noqa: PLC0415
+        _mcp_proxy.mcp_config = _mcp_proxy.MCPConfig(
+            mode=resolved_mcp_mode,
+            upstream_url=resolved_mcp_upstream_url,
+            upstream_transport=resolved_mcp_upstream_transport,
+            upstream_command=resolved_mcp_upstream_command,
+            fail_rate=clamp_probability(resolved_mcp_fail_rate),
+            fault_codes=tuple(resolved_mcp_error_codes),
+            latency_p=clamp_probability(resolved_mcp_latency_p),
+            latency_min=resolved_latency_min,
+            latency_max=resolved_latency_max,
+            seed=resolved_seed,
+        )
+        _mcp_proxy.mcp_stats = _mcp_proxy.MCPStats()
+        app.mount("/", _mcp_proxy.app)
     install_signal_handlers()
     try:
         uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")

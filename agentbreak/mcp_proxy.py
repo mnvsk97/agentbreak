@@ -565,9 +565,11 @@ async def _forward_sse(mcp_req: MCPRequest) -> JSONResponse:
 
 
 async def _process_single_mcp_request(
-    raw: dict[str, Any], body: bytes, http_request: Request
+    raw: Any, body: bytes, http_request: Request
 ) -> dict[str, Any]:
     """Process one parsed JSON-RPC request dict and return a response dict."""
+    if not isinstance(raw, dict):
+        return mcp_error_response(None, MCPError(code=INVALID_REQUEST, message="Invalid Request: batch items must be JSON objects"))
     assert mcp_config is not None
     start_time = time.monotonic()
 

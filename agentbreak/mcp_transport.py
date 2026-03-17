@@ -204,6 +204,7 @@ class SSETransport(MCPTransport):
                                     future.set_result(msg)
                             except json.JSONDecodeError as exc:
                                 print(f"AgentBreak SSE: malformed JSON from upstream, ignoring message: {exc}", file=sys.stderr)
+                    elif line == "":
                         event_type = ""
         except Exception as exc:
             for future in list(self._pending.values()):
@@ -228,6 +229,7 @@ class SSETransport(MCPTransport):
             if self._endpoint_url is not None:
                 return
             await asyncio.sleep(0.1)
+        self._started = False
         raise RuntimeError(
             "SSE upstream did not send an endpoint URL within 5 seconds"
         )
