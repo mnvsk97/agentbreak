@@ -7,3 +7,6 @@ dist/
 config.yaml
 .superdesign/
 .claude/
+
+# ralphex progress logs
+.ralphex/progress/
