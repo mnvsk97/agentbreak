@@ -279,3 +279,152 @@ curl http://localhost:5000/_agentbreak/scorecard
 6. **Config file is loaded from `./config.yaml` automatically.** If the file exists and you want to ignore it, pass `--config /dev/null`.
 7. **The mock response body is always `"AgentBreak mock response."`** — it does not stream and does not call tools. If your app requires tool calls or streaming, use proxy mode.
 8. **`request_count` in `config.yaml` is read by the example scripts**, not by AgentBreak itself. The server runs until stopped.
+
+## MCP Proxy
+
+AgentBreak also proxies MCP (Model Context Protocol) servers using JSON-RPC 2.0. The MCP proxy runs on port 5001 by default.
+
+```
+mock mode:   MCP client → AgentBreak MCP proxy → stub response (or injected fault)
+proxy mode:  MCP client → AgentBreak MCP proxy → real MCP server (or injected fault)
+```
+
+### MCP Modes
+
+| Mode    | When to use                                              |
+|---------|----------------------------------------------------------|
+| `mock`  | Local dev, CI, no real MCP server needed                 |
+| `proxy` | End-to-end testing with a real MCP server                |
+
+### MCP Scenarios
+
+| Scenario                    | Fail rate | Codes          | Latency | What it tests                        |
+|-----------------------------|-----------|----------------|---------|--------------------------------------|
+| `mcp-tool-failures`         | 30%       | 429, 500, 503  | none    | Tool call retry and backoff          |
+| `mcp-resource-unavailable`  | 50%       | 404, 503       | none    | Resource read fallback handling      |
+| `mcp-slow-tools`            | 0%        | none           | 90%     | Timeout handling for slow tools      |
+| `mcp-initialization-failure`| 50%       | 500, 503       | none    | Initialization retry logic           |
+| `mcp-mixed-transient`       | 20%       | 429, 500, 503  | 10%     | General resilience / brownout        |
+
+### MCP CLI Reference
+
+```
+agentbreak mcp start [OPTIONS]
+
+  --mode TEXT                   proxy | mock  (default: mock)
+  --upstream-url TEXT           Base URL of the MCP server
+  --upstream-transport TEXT     Transport: http | sse | stdio  (default: http)
+  --upstream-command TEXT       Command for stdio transport
+  --upstream-timeout FLOAT      Timeout in seconds (default: 30)
+  --scenario TEXT               Built-in MCP scenario name
+  --fail-rate FLOAT             Probability of injecting a fault (0.0–1.0)
+  --fault-codes TEXT            Comma-separated codes: 429,500,503
+  --latency-p FLOAT             Probability of injecting latency
+  --latency-min FLOAT           Min delay in seconds (default: 5)
+  --latency-max FLOAT           Max delay in seconds (default: 15)
+  --seed INT                    Fix random seed for deterministic runs
+  --port INT                    Port to bind on (default: 5001)
+```
+
+```
+agentbreak mcp test [--url URL] [--transport http|stdio] [--command CMD]
+agentbreak mcp list-tools [--url URL] [--transport http|stdio] [--command CMD]
+agentbreak mcp call-tool TOOL [--args JSON] [--url URL] [--transport http|stdio]
+```
+
+### MCP Useful Endpoints
+
+```bash
+curl http://localhost:5001/_agentbreak/mcp/scorecard
+curl http://localhost:5001/_agentbreak/mcp/tool-calls
+curl http://localhost:5001/healthz
+```
+
+### MCP Scorecard
+
+```json
+{
+  "requests_seen": 15,
+  "injected_faults": 3,
+  "latency_injections": 1,
+  "upstream_successes": 12,
+  "upstream_failures": 3,
+  "duplicate_requests": 2,
+  "suspected_loops": 0,
+  "tool_calls": 8,
+  "resource_reads": 3,
+  "init_requests": 1,
+  "method_counts": {"initialize": 1, "tools/call": 8, "tools/list": 3},
+  "tool_successes_by_name": {"echo": 5, "get_time": 3},
+  "tool_failures_by_name": {"echo": 1},
+  "run_outcome": "DEGRADED",
+  "resilience_score": 73
+}
+```
+
+`run_outcome`: `PASS` (no failures, no loops), `DEGRADED` (some failures, some successes), `FAIL` (all failed or loops with no successes).
+
+`resilience_score` formula: `100 - (injected_faults × 3) - (upstream_failures × 12) - (duplicate_requests × 2) - (suspected_loops × 10)`
+
+### MCP Error Code Mapping
+
+AgentBreak maps HTTP-style fault codes to MCP JSON-RPC 2.0 error codes:
+
+| HTTP code | MCP error code | Meaning                  |
+|-----------|----------------|--------------------------|
+| 400, 413  | -32600         | Invalid request          |
+| 401, 403  | -32603         | Auth/permission failure  |
+| 404       | -32601         | Resource not found       |
+| 429       | -32000         | Rate limit / tool error  |
+| 500, 503  | -32603         | Internal error           |
+
+### MCP Common Patterns
+
+```bash
+# Local dev — mock mode, no real server
+agentbreak mcp start --mode mock --scenario mcp-mixed-transient --fail-rate 0.2
+
+# CI — deterministic run
+agentbreak mcp start --mode mock --scenario mcp-tool-failures --seed 42 &
+python my_mcp_app.py
+curl http://localhost:5001/_agentbreak/mcp/scorecard
+
+# Proxy mode — real MCP server via HTTP
+agentbreak mcp start --mode proxy --upstream-url http://localhost:8080 --fail-rate 0.3
+
+# Proxy mode — real MCP server via stdio
+agentbreak mcp start --mode proxy \
+  --upstream-transport stdio \
+  --upstream-command 'python my_server.py' \
+  --fail-rate 0.2
+
+# Test connectivity to any MCP server
+agentbreak mcp test --url http://localhost:8080
+agentbreak mcp list-tools --url http://localhost:8080
+agentbreak mcp call-tool echo --args '{"text": "hello"}' --url http://localhost:8080
+```
+
+### MCP Debugging
+
+**MCP client not connecting:**
+- Confirm the client URL is `http://localhost:5001/mcp` (include `/mcp` path)
+- Check with `curl http://localhost:5001/healthz`
+
+**All MCP requests failing:**
+- In mock mode, any requests should succeed (unless fail-rate is 1.0)
+- In proxy mode, verify `--upstream-url` and that the real server is running
+- Check `/_agentbreak/mcp/scorecard` — if `upstream_failures` equals `requests_seen`, the upstream is unreachable
+
+**MCP errors always have HTTP 200:**
+- This is correct. MCP uses JSON-RPC 2.0 where errors are in the response body, not the HTTP status.
+
+**`suspected_loops` is high:**
+- The same tool call (same name + arguments) was seen 3+ times. Check your retry logic has a max count.
+
+### MCP Gotchas
+
+1. **MCP proxy listens on port 5001**, not 5000. The OpenAI proxy uses 5000.
+2. **Injected MCP errors always return HTTP 200** with a JSON-RPC error body — this is the MCP spec.
+3. **Mock tool responses are always `"Mock result for tool: <name>"`** — they do not call real backends.
+4. **`--upstream-command` for stdio** must be a shell command string, not a list. Quote complex commands.
+5. **Fingerprinting excludes the JSON-RPC `id` field**, so retries with new IDs are still detected as duplicates.

@@ -89,6 +89,79 @@ Ask for the skill by name, for example:
 - `Use the agentbreak-testing skill to run proxy mode against https://api.openai.com and report the scorecard.`
 - `Use the agentbreak-testing skill to run the simple_langchain example with AGENTBREAK_REQUEST_COUNT=10.`
 
+## MCP Proxy Testing
+
+Use this section when the user wants to test an MCP (Model Context Protocol) server or an app that uses MCP tools and resources.
+
+### MCP Workflow
+
+1. Decide mode:
+   - `mock` for zero-upstream local testing (no real MCP server needed)
+   - `proxy` for fault injection in front of a real MCP server
+
+2. Prefer MCP scenarios first:
+   - `mcp-tool-failures` — 30% fail rate with 429/500/503
+   - `mcp-resource-unavailable` — 50% fail with 404/503
+   - `mcp-slow-tools` — 90% latency injection (5–15s)
+   - `mcp-initialization-failure` — 50% fail on init
+   - `mcp-mixed-transient` — 20% fail + 10% latency
+
+3. Start the MCP proxy on port 5001:
+
+```bash
+agentbreak mcp start --mode mock --scenario mcp-mixed-transient --fail-rate 0.2
+```
+
+Or for proxy mode with a real HTTP upstream:
+
+```bash
+agentbreak mcp start --mode proxy --upstream-url http://localhost:8080 --fail-rate 0.2
+```
+
+Or for proxy mode with a stdio upstream:
+
+```bash
+agentbreak mcp start --mode proxy \
+  --upstream-transport stdio \
+  --upstream-command 'python my_server.py' \
+  --fail-rate 0.2
+```
+
+4. Point the MCP client at `http://localhost:5001/mcp`.
+
+5. Run the target application.
+
+6. Inspect the MCP scorecard:
+
+```bash
+curl http://localhost:5001/_agentbreak/mcp/scorecard
+curl http://localhost:5001/_agentbreak/mcp/tool-calls
+```
+
+7. Summarize:
+   - requests seen, tool calls, resource reads, init requests
+   - injected faults and latency injections
+   - duplicate requests and suspected loops
+   - run outcome and resilience score
+   - per-tool and per-URI success/failure counts
+
+8. Test individual MCP tools directly:
+
+```bash
+agentbreak mcp test --url http://localhost:5001
+agentbreak mcp list-tools --url http://localhost:5001
+agentbreak mcp call-tool echo --args '{"text": "hello"}' --url http://localhost:5001
+```
+
+### MCP Notes
+
+- The MCP proxy always returns HTTP 200 — MCP errors are in the JSON-RPC body, not the status code.
+- `duplicate_requests` means the same tool call (name + arguments) was seen more than once — normal for retries.
+- `suspected_loops` means the same tool call was seen 3+ times — check max retry count.
+- For CI, use `--seed INT` to make fault injection deterministic and reproducible.
+- The OpenAI proxy uses port 5000; the MCP proxy uses port 5001. Both can run simultaneously.
+- Full MCP reference: see `docs/mcp-proxy-guide.md` in the AgentBreak repo.
+
 ## Notes
 
 - If `config.yaml` exists, `agentbreak start` will load it automatically.

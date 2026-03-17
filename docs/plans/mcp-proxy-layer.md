@@ -138,13 +138,13 @@ MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interac
 
 ### Task 12: Update documentation and tests
 
-- [ ] Update main README.md with MCP proxy section
-- [ ] Create `docs/mcp-proxy-guide.md` with detailed usage
-- [ ] Document MCP error codes and mapping
-- [ ] Add FAQ section for MCP-specific questions
-- [ ] Create integration test suite for end-to-end MCP scenarios
-- [ ] Update `.claude-plugin/commands/agentbreak.md` with MCP commands
-- [ ] Add MCP examples to `skills/agentbreak-testing/SKILL.md`
+- [x] Update main README.md with MCP proxy section
+- [x] Create `docs/mcp-proxy-guide.md` with detailed usage
+- [x] Document MCP error codes and mapping
+- [x] Add FAQ section for MCP-specific questions
+- [x] Create integration test suite for end-to-end MCP scenarios
+- [x] Update `.claude-plugin/commands/agentbreak.md` with MCP commands
+- [x] Add MCP examples to `skills/agentbreak-testing/SKILL.md`
 
 ### Task 13: Add MCP proxy performance optimizations
 

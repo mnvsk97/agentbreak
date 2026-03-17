@@ -135,6 +135,37 @@ OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://localhost:5000/v1 python main.py
 
 More examples: [examples/README.md](examples/README.md)
 
+## MCP Proxy
+
+AgentBreak also proxies [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers.
+MCP is a JSON-RPC 2.0 protocol used by Claude Code and other AI tools to interact with external
+services through tools, resources, and prompts.
+
+The MCP proxy sits between MCP clients and MCP servers, injecting faults and tracking duplicate
+or looping tool calls — the same way the OpenAI proxy works for chat completions.
+
+```text
+mock mode:   MCP client → AgentBreak MCP proxy → fake response / injected fault
+proxy mode:  MCP client → AgentBreak MCP proxy → real MCP server (or injected fault)
+```
+
+Start the MCP proxy in mock mode (no real MCP server needed):
+
+```bash
+agentbreak mcp start --mode mock --scenario mcp-mixed-transient --fail-rate 0.2
+```
+
+Point your MCP client at `http://localhost:5001/mcp`.
+
+Check the MCP scorecard:
+
+```bash
+curl http://localhost:5001/_agentbreak/mcp/scorecard
+curl http://localhost:5001/_agentbreak/mcp/tool-calls
+```
+
+See [docs/mcp-proxy-guide.md](docs/mcp-proxy-guide.md) for a detailed usage guide.
+
 ## MCP Commands
 
 AgentBreak includes `agentbreak mcp` subcommands for working with MCP servers.
