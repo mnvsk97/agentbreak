@@ -33,6 +33,9 @@ mcp_upstream_transport: http
 # Probability of injecting a fault into MCP requests (0.0 to 1.0)
 mcp_fail_rate: 0.1
 
+# Probability of injecting latency into MCP requests (0.0 to 1.0)
+mcp_latency_p: 0.0
+
 # HTTP-style error codes to inject into MCP requests (mapped to JSON-RPC error codes internally).
 # Supported: 400, 401, 403, 404, 413, 429, 500, 503
 # mcp_error_codes:

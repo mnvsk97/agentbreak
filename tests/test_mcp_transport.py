@@ -276,13 +276,15 @@ def test_sse_transport_stop_cleans_up() -> None:
         mock_client = MagicMock()
         mock_client.aclose = AsyncMock()
         transport._client = mock_client
-        mock_task = MagicMock()
-        mock_task.cancel = MagicMock()
-        transport._sse_task = mock_task
+        # Use a real asyncio.Task so stop() can await it after cancellation.
+        async def _long_running() -> None:
+            await asyncio.sleep(100)
+        task = asyncio.get_event_loop().create_task(_long_running())
+        transport._sse_task = task
 
         await transport.stop()
 
-        mock_task.cancel.assert_called_once()
+        assert task.cancelled()
         mock_client.aclose.assert_called_once()
         assert transport._client is None
         assert transport._endpoint_url is None

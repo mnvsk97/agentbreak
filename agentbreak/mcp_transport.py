@@ -132,7 +132,12 @@ class StdioTransport(MCPTransport):
                     raise RuntimeError(
                         "Stdio upstream closed the connection unexpectedly"
                     )
-                return json.loads(response_line.decode().strip())
+                try:
+                    return json.loads(response_line.decode().strip())
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        f"Stdio upstream returned malformed JSON: {exc}"
+                    ) from exc
             raise RuntimeError("Stdio upstream failed after restart attempt")
 
     async def stop(self) -> None:
@@ -262,11 +267,14 @@ class SSETransport(MCPTransport):
                 headers={"Content-Type": "application/json"},
             )
             return await asyncio.wait_for(future, timeout=self.timeout)
-        except asyncio.TimeoutError as exc:
+        except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
             self._pending.pop(request.id, None)
             raise TimeoutError(
                 f"SSE upstream timed out after {self.timeout}s"
             ) from exc
+        except httpx.HTTPError as exc:
+            self._pending.pop(request.id, None)
+            raise RuntimeError(f"SSE upstream HTTP error: {exc}") from exc
         except Exception:
             self._pending.pop(request.id, None)
             raise
@@ -275,6 +283,7 @@ class SSETransport(MCPTransport):
         """Cancel the SSE listener and close the HTTP client."""
         if self._sse_task is not None:
             self._sse_task.cancel()
+            await asyncio.gather(self._sse_task, return_exceptions=True)
             self._sse_task = None
         if self._client is not None:
             await self._client.aclose()

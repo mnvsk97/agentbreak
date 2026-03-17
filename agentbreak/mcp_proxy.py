@@ -360,7 +360,10 @@ def scorecard_data() -> dict[str, Any]:
     score -= mcp_stats.duplicate_requests * 2
     score -= mcp_stats.suspected_loops * 10
     score = max(0, min(100, score))
-    if mcp_stats.upstream_failures == 0 and mcp_stats.suspected_loops == 0:
+    # PASS requires actual upstream successes, not merely an absence of failures.
+    # An all-fault run (injected_faults > 0, upstream_successes == 0) should not PASS.
+    no_failures = mcp_stats.upstream_failures == 0 and mcp_stats.suspected_loops == 0
+    if no_failures and (mcp_stats.upstream_successes > 0 or mcp_stats.total_requests == 0):
         outcome = "PASS"
     elif mcp_stats.upstream_successes > 0:
         outcome = "DEGRADED"
@@ -556,6 +559,10 @@ async def _forward_sse(mcp_req: MCPRequest) -> JSONResponse:
         if _sse_transport is not None and (
             _sse_transport._sse_task is None or _sse_transport._sse_task.done()
         ):
+            try:
+                await _sse_transport.stop()
+            except Exception:
+                pass
             _sse_transport = None
         mcp_stats.upstream_failures += 1
         return JSONResponse(
@@ -695,22 +702,36 @@ async def proxy_mcp(request: Request) -> JSONResponse:
                     None, MCPError(code=INVALID_REQUEST, message="Invalid Request: batch must not be empty")
                 ),
             )
-        tasks = [
-            _process_single_mcp_request(item, json.dumps(item).encode(), request)
+        # For stdio/SSE proxy mode, forwarding notifications would await a response
+        # that the upstream will never send. Skip those items entirely.
+        skip_stdio_sse_notifications = (
+            mcp_config.mode == "proxy" and mcp_config.upstream_transport in {"stdio", "sse"}
+        )
+        items_to_process = [
+            (item, json.dumps(item).encode())
             for item in parsed
+            if not (skip_stdio_sse_notifications and isinstance(item, dict) and "id" not in item)
+        ]
+        tasks = [
+            _process_single_mcp_request(item, item_bytes, request)
+            for item, item_bytes in items_to_process
         ]
         responses = await asyncio.gather(*tasks)
         # Per JSON-RPC 2.0, notifications (items with no "id" field) must not
         # receive a response. Filter them out of the batch response array.
         non_notification_responses = [
             resp
-            for item, resp in zip(parsed, responses)
+            for (item, _), resp in zip(items_to_process, responses)
             if isinstance(item, dict) and "id" in item
         ]
         return JSONResponse(status_code=200, content=non_notification_responses)
 
     # Per JSON-RPC 2.0, notifications (requests with no "id") must not receive a response.
     is_notification = isinstance(parsed, dict) and "id" not in parsed
+    # In proxy mode with stdio/SSE transport, forwarding notifications would await a
+    # response that the upstream will never send, causing a timeout. Skip processing.
+    if is_notification and mcp_config.mode == "proxy" and mcp_config.upstream_transport in {"stdio", "sse"}:
+        return Response(status_code=200)
     result = await _process_single_mcp_request(parsed, body, request)
     if is_notification:
         return Response(status_code=200)
