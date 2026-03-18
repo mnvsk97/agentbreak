@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,7 +17,6 @@ from agentbreak.config.models import (
     LatencyConfig,
     MCPServiceConfig,
     OpenAIServiceConfig,
-    ServiceType,
 )
 from agentbreak.core.statistics import StatisticsTracker
 from agentbreak.runner import MultiServiceRunner

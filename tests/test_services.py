@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from agentbreak.config.models import (
@@ -13,12 +11,11 @@ from agentbreak.config.models import (
     LatencyConfig,
     MCPServiceConfig,
     OpenAIServiceConfig,
-    ServiceType,
 )
 from agentbreak.core.statistics import StatisticsTracker
-from agentbreak.protocols.mcp import MCPError, MCPRequest, MCPResponse
-from agentbreak.services.mcp import MCPProxy, MCPService
-from agentbreak.services.openai import OpenAIProxy, OpenAIService
+from agentbreak.protocols.mcp import MCPError, MCPResponse
+from agentbreak.services.mcp import MCPService
+from agentbreak.services.openai import OpenAIService
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +65,6 @@ def test_protocols_mcp_import() -> None:
         INVALID_REQUEST,
         JSONRPC_VERSION,
         PARSE_ERROR,
-        MCPError,
-        MCPRequest,
-        MCPResponse,
-        fingerprint_mcp_request,
     )
     assert JSONRPC_VERSION == "2.0"
     assert PARSE_ERROR == -32700
@@ -80,7 +73,7 @@ def test_protocols_mcp_import() -> None:
 
 
 def test_protocols_package_import() -> None:
-    from agentbreak.protocols import MCPRequest, MCPResponse, fingerprint_mcp_request
+    from agentbreak.protocols import MCPRequest, fingerprint_mcp_request
 
     req = MCPRequest(method="tools/list", id=1)
     fp = fingerprint_mcp_request(req)

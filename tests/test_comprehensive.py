@@ -27,8 +27,7 @@ from agentbreak.config.models import FaultConfig, LatencyConfig, MCPServiceConfi
 from agentbreak.core.statistics import StatisticsTracker
 from agentbreak.protocols.mcp import MCPRequest
 from agentbreak.services.mcp import MCPProxy, MCPService
-from agentbreak.services.openai import OpenAIProxy, OpenAIService
-from agentbreak.transports.http import HTTPTransport
+from agentbreak.services.openai import OpenAIService
 from agentbreak.transports.sse import SSETransport
 from agentbreak.transports.stdio import StdioTransport
 from agentbreak.utils.http import make_async_client

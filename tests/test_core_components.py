@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agentbreak.config.models import FaultConfig, LatencyConfig, ServiceConfig, ServiceType
+from agentbreak.config.models import FaultConfig, LatencyConfig
 from agentbreak.core.fault_injection import FaultInjector, FaultResult
 from agentbreak.core.latency import LatencyInjector
-from agentbreak.core.proxy import BaseProxy, ProxyContext
-from agentbreak.core.statistics import ServiceStatistics, StatisticsTracker
+from agentbreak.core.proxy import ProxyContext
+from agentbreak.core.statistics import StatisticsTracker
 from agentbreak.utils.hashing import fingerprint_bytes
 from agentbreak.utils.headers import filter_headers
 from agentbreak.utils.random import clamp_probability, should_inject

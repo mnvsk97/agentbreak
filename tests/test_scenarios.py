@@ -6,7 +6,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 from agentbreak.config.loader import load_config, load_scenario, _parse_config
 from agentbreak.config.models import OpenAIServiceConfig, MCPServiceConfig
