@@ -31,13 +31,8 @@ class StdioTransport(MCPTransport):
         self.command = command
         self.timeout = timeout
         self._process: asyncio.subprocess.Process | None = None
-        self._lock: asyncio.Lock | None = None
+        self._lock = asyncio.Lock()
         self._started = False
-
-    def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
 
     async def _ensure_process(self) -> asyncio.subprocess.Process:
         if self._process is None or self._process.returncode is not None:
@@ -61,7 +56,7 @@ class StdioTransport(MCPTransport):
             await self._ensure_process()
 
     async def send_request(self, request: MCPRequest) -> dict[str, Any]:
-        async with self._get_lock():
+        async with self._lock:
             for attempt in range(2):
                 process = await self._ensure_process()
                 assert process.stdin is not None and process.stdout is not None

@@ -132,16 +132,38 @@ class SSETransport(MCPTransport):
                 content=request.to_json_bytes(),
                 headers={"Content-Type": "application/json"},
             )
-            return await asyncio.wait_for(future, timeout=self.timeout)
+            result = await asyncio.wait_for(future, timeout=self.timeout)
+            return result
         except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
+            # Cancel the future to ensure it doesn't leak
+            if not future.done():
+                future.cancel()
+                try:
+                    await future
+                except (asyncio.CancelledError, asyncio.InvalidStateError):
+                    pass
             self._pending.pop(request.id, None)
             raise TimeoutError(
                 f"SSE upstream timed out after {self.timeout}s"
             ) from exc
         except httpx.HTTPError as exc:
+            # Cancel the future to ensure it doesn't leak
+            if not future.done():
+                future.cancel()
+                try:
+                    await future
+                except (asyncio.CancelledError, asyncio.InvalidStateError):
+                    pass
             self._pending.pop(request.id, None)
             raise RuntimeError(f"SSE upstream HTTP error: {exc}") from exc
         except Exception:
+            # Cancel the future to ensure it doesn't leak
+            if not future.done():
+                future.cancel()
+                try:
+                    await future
+                except (asyncio.CancelledError, asyncio.InvalidStateError):
+                    pass
             self._pending.pop(request.id, None)
             raise
 

@@ -25,9 +25,11 @@ class FaultConfig(BaseModel):
 
     enabled: bool = True
     overall_rate: float = Field(ge=0.0, le=1.0, default=0.1)
-    # Per-error-type rates override overall_rate if specified
+    # Per-error-type rates override overall_rate if specified.
+    # These are absolute probabilities checked independently, not normalized.
+    # Conservative defaults to avoid unintended high fault injection.
     per_error_rates: dict[int, float] = Field(
-        default_factory=lambda: {429: 0.4, 500: 0.4, 503: 0.2}
+        default_factory=lambda: {429: 0.05, 500: 0.03, 503: 0.02}
     )
     # Error codes to randomly select from when using overall_rate
     available_codes: tuple[int, ...] = (429, 500, 503)
@@ -91,12 +93,46 @@ class MCPServiceConfig(ServiceConfig):
     upstream_command: tuple[str, ...] = ()
     upstream_timeout: float = 30.0
     cache_ttl: float = 60.0
-    # Mock data
+    # Mock data - validated for required fields
     mock_tools: list[dict[str, Any]] = Field(default_factory=list)
     mock_resources: list[dict[str, Any]] = Field(default_factory=list)
     mock_prompts: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"arbitrary_types_allowed": True}
+
+    @model_validator(mode="after")
+    def validate_mock_data(self) -> "MCPServiceConfig":
+        """Validate mock data structure for required fields."""
+        # Validate mock tools
+        for i, tool in enumerate(self.mock_tools):
+            if not isinstance(tool, dict):
+                raise ValueError(f"mock_tools[{i}]: must be a dict")
+            if "name" not in tool:
+                raise ValueError(f"mock_tools[{i}]: missing required field 'name'")
+            if "description" not in tool:
+                raise ValueError(f"mock_tools[{i}]: missing required field 'description'")
+            if "inputSchema" not in tool:
+                raise ValueError(f"mock_tools[{i}]: missing required field 'inputSchema'")
+
+        # Validate mock resources
+        for i, resource in enumerate(self.mock_resources):
+            if not isinstance(resource, dict):
+                raise ValueError(f"mock_resources[{i}]: must be a dict")
+            if "uri" not in resource:
+                raise ValueError(f"mock_resources[{i}]: missing required field 'uri'")
+            if "name" not in resource:
+                raise ValueError(f"mock_resources[{i}]: missing required field 'name'")
+
+        # Validate mock prompts
+        for i, prompt in enumerate(self.mock_prompts):
+            if not isinstance(prompt, dict):
+                raise ValueError(f"mock_prompts[{i}]: must be a dict")
+            if "name" not in prompt:
+                raise ValueError(f"mock_prompts[{i}]: missing required field 'name'")
+            if "description" not in prompt:
+                raise ValueError(f"mock_prompts[{i}]: missing required field 'description'")
+
+        return self
 
 
 class AgentBreakConfig(BaseModel):

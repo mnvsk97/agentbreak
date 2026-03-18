@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -60,8 +61,8 @@ class HTTPTransport(MCPTransport):
             raise RuntimeError(f"HTTP upstream error: {exc}") from exc
         try:
             return response.json()
-        except Exception as exc:
-            raise RuntimeError("HTTP upstream returned non-JSON response") from exc
+        except (json.JSONDecodeError, ValueError, AttributeError, Exception) as exc:
+            raise RuntimeError(f"HTTP upstream returned non-JSON response: {exc}") from exc
 
     async def stop(self) -> None:
         """Close the HTTP client."""

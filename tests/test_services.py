@@ -238,7 +238,7 @@ def test_mcp_service_initialize() -> None:
 
 def test_mcp_service_tools_list() -> None:
     config = _make_mcp_config(
-        mock_tools=[{"name": "search", "description": "Search the web"}]
+        mock_tools=[{"name": "search", "description": "Search the web", "inputSchema": {"type": "object", "properties": {}}}]
     )
     stats = StatisticsTracker()
     svc = MCPService(config, stats)

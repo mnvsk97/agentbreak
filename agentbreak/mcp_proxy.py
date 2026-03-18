@@ -307,11 +307,14 @@ async def _get_upstream_http_client() -> httpx.AsyncClient:
     config = _get_config()
     async with _client_lock:
         if _upstream_http_client is None:
-            _upstream_http_client = httpx.AsyncClient(
-                timeout=config.upstream_timeout,
-                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            )
-            mcp_stats.http_pool_size = 20
+            try:
+                _upstream_http_client = httpx.AsyncClient(
+                    timeout=config.upstream_timeout,
+                    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                )
+                mcp_stats.http_pool_size = 20
+            except Exception as exc:
+                raise RuntimeError(f"Failed to create HTTP client: {exc}") from exc
     return _upstream_http_client
 
 
@@ -761,6 +764,17 @@ async def proxy_mcp(request: Request) -> JSONResponse:
     _get_config()  # Validate config is set
     body = await request.body()
 
+    # Prevent memory exhaustion attacks by limiting request body size
+    MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10 MB limit
+    if len(body) > MAX_REQUEST_SIZE:
+        return JSONResponse(
+            status_code=200,
+            content=mcp_error_response(
+                None,
+                MCPError(code=INVALID_REQUEST, message=f"Request body too large: {len(body)} bytes (max {MAX_REQUEST_SIZE} bytes)")
+            ),
+        )
+
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -796,7 +810,7 @@ async def proxy_mcp(request: Request) -> JSONResponse:
             _process_single_mcp_request(item, item_bytes, request)
             for item, item_bytes in items_to_process
         ]
-        responses = await asyncio.gather(*tasks)
+        responses = await asyncio.gather(*tasks, return_exceptions=False)
         # Per JSON-RPC 2.0, notifications (items with no "id" field) must not
         # receive a response. Filter them out of the batch response array.
         non_notification_responses = [
