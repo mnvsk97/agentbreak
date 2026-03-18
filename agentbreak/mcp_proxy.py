@@ -209,6 +209,9 @@ def _get_config() -> MCPConfig:
 
 def pick_mcp_error() -> MCPError:
     config = _get_config()
+    if not config.fault_codes:
+        # If no fault codes configured, return a default error
+        return MCPError(code=INTERNAL_ERROR, message="Fault injected by AgentBreak.")
     http_code = random.choice(config.fault_codes)
     entry = _HTTP_TO_MCP.get(http_code, (INTERNAL_ERROR, f"Fault injected by AgentBreak (code {http_code})."))
     mcp_code, message = entry
@@ -265,11 +268,22 @@ async def maybe_delay() -> None:
 
 
 def _cache_key(method: str, params: dict[str, Any] | None) -> str:
-    params_str = json.dumps(params, sort_keys=True) if params else ""
+    # Limit param serialization size to prevent DoS via large payloads
+    if params:
+        params_str = json.dumps(params, sort_keys=True)
+        # Truncate if too large to prevent excessive memory usage
+        MAX_KEY_LENGTH = 1000
+        if len(params_str) > MAX_KEY_LENGTH:
+            # Hash the large string instead
+            import hashlib
+            params_str = hashlib.sha256(params_str.encode()).hexdigest()[:16]
+    else:
+        params_str = ""
     return f"{method}:{params_str}"
 
 
 _MAX_CACHE_SIZE = 1000
+_MAX_BATCH_SIZE = 100  # Limit JSON-RPC batch size to prevent DoS
 
 
 async def _get_from_cache(method: str, params: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -519,7 +533,7 @@ async def _forward_http(
             content=body,
             headers=filter_headers(http_request.headers),
         )
-    except httpx.HTTPError as exc:
+    except httpx.HTTPError:
         return (
             JSONResponse(
                 status_code=200,
@@ -527,7 +541,7 @@ async def _forward_http(
                     mcp_req.id,
                     MCPError(
                         code=INTERNAL_ERROR,
-                        message=f"AgentBreak could not reach upstream: {exc}",
+                        message="AgentBreak could not reach upstream server",
                     ),
                 ),
             ),
@@ -566,7 +580,7 @@ async def _forward_stdio(mcp_req: MCPRequest) -> tuple[JSONResponse, bool]:
     try:
         result = await _stdio_transport.send_request(mcp_req)
         return JSONResponse(status_code=200, content=result), True
-    except (TimeoutError, RuntimeError, OSError) as exc:
+    except (TimeoutError, RuntimeError, OSError):
         return (
             JSONResponse(
                 status_code=200,
@@ -574,7 +588,7 @@ async def _forward_stdio(mcp_req: MCPRequest) -> tuple[JSONResponse, bool]:
                     mcp_req.id,
                     MCPError(
                         code=INTERNAL_ERROR,
-                        message=f"Stdio upstream error: {exc}",
+                        message="Stdio upstream communication error",
                     ),
                 ),
             ),
@@ -598,7 +612,7 @@ async def _forward_sse(mcp_req: MCPRequest) -> tuple[JSONResponse, bool]:
     try:
         result = await _sse_transport.send_request(mcp_req)
         return JSONResponse(status_code=200, content=result), True
-    except (TimeoutError, RuntimeError, OSError) as exc:
+    except (TimeoutError, RuntimeError, OSError):
         # If the SSE listener task has died, reset the singleton so the next
         # request creates a fresh transport and reconnects.
         if _sse_transport is not None and (
@@ -616,7 +630,7 @@ async def _forward_sse(mcp_req: MCPRequest) -> tuple[JSONResponse, bool]:
                     mcp_req.id,
                     MCPError(
                         code=INTERNAL_ERROR,
-                        message=f"SSE upstream error: {exc}",
+                        message="SSE upstream communication error",
                     ),
                 ),
             ),
@@ -638,13 +652,13 @@ async def _process_single_mcp_request(
     try:
         mcp_req = MCPRequest.from_dict(raw)
         mcp_req._json_bytes = body  # cache original bytes to skip re-serialization
-    except (ValueError, KeyError) as exc:
+    except (ValueError, KeyError):
         parse_elapsed = (time.monotonic() - parse_start) * 1000
         elapsed = (time.monotonic() - start_time) * 1000
         async with mcp_stats._lock:
             mcp_stats.parse_time_ms += parse_elapsed
             mcp_stats.total_processing_time_ms += elapsed
-        return mcp_error_response(raw.get("id"), MCPError(code=INVALID_REQUEST, message=f"Invalid Request: {exc}"))
+        return mcp_error_response(raw.get("id"), MCPError(code=INVALID_REQUEST, message="Invalid Request: Malformed JSON-RPC"))
     parse_elapsed = (time.monotonic() - parse_start) * 1000
     async with mcp_stats._lock:
         mcp_stats.parse_time_ms += parse_elapsed
@@ -777,17 +791,25 @@ async def proxy_mcp(request: Request) -> JSONResponse:
 
     try:
         parsed = json.loads(body)
-    except json.JSONDecodeError as exc:
+    except json.JSONDecodeError:
         return JSONResponse(
             status_code=200,
             content=mcp_error_response(
                 None,
-                MCPError(code=PARSE_ERROR, message=f"Parse error: {exc}"),
+                MCPError(code=PARSE_ERROR, message="Parse error: Invalid JSON"),
             ),
         )
 
     # JSON-RPC 2.0 batch request: process all items concurrently.
     if isinstance(parsed, list):
+        # Limit batch size to prevent DoS
+        if len(parsed) > _MAX_BATCH_SIZE:
+            return JSONResponse(
+                status_code=400,
+                content=mcp_error_response(
+                    None, MCPError(code=INVALID_REQUEST, message=f"Batch request too large (max {_MAX_BATCH_SIZE} items)")
+                ),
+            )
         # Empty batch is invalid per JSON-RPC 2.0 spec.
         if not parsed:
             return JSONResponse(

@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, Response
 PORT = 5000
 cli = typer.Typer(add_completion=False, help="Minimal chaos proxy for OpenAI-compatible LLM apps.")
 SUPPORTED_ERROR_CODES = (400, 401, 403, 404, 413, 429, 500, 503)
+MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB limit to prevent DoS
 DEFAULT_ERROR_CODES = (429, 500, 503)
 SCENARIOS: dict[str, dict[str, Any]] = {
     "mixed-transient": {"error_codes": (429, 500, 503), "latency_p": 0.0},
@@ -341,7 +342,8 @@ async def maybe_delay() -> None:
         raise RuntimeError("Configuration not initialized")
     if not should_inject(config.latency_p):
         return
-    stats.latency_injections += 1
+    async with stats._lock:
+        stats.latency_injections += 1
     delay = random.uniform(config.latency_min, config.latency_max)
     await asyncio.sleep(delay)
 
@@ -351,6 +353,8 @@ async def proxy_chat_completions(request: Request) -> Response:
     if config is None:
         raise RuntimeError("Configuration not initialized")
     body = await request.body()
+    if len(body) > MAX_REQUEST_SIZE:
+        return JSONResponse(status_code=413, content={"error": "Request too large"})
     await record_request(body)
 
     if should_inject(config.fail_rate):
