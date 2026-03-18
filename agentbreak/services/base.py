@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 
 from fastapi import FastAPI
 
+from agentbreak.api import setup_health_routes, setup_metrics_routes
 from agentbreak.config.models import ServiceConfig
 from agentbreak.core.proxy import BaseProxy
 from agentbreak.core.statistics import StatisticsTracker
@@ -30,21 +31,8 @@ class BaseService(ABC):
 
     def setup_common_routes(self) -> None:
         """Setup common routes (health check, scorecard, recent requests)."""
-        service_name = self.config.name
-        stats = self.stats
-
-        @self.app.get("/healthz")
-        async def health_check() -> dict:
-            return {"status": "ok", "service": service_name}
-
-        @self.app.get("/_agentbreak/scorecard")
-        async def get_scorecard() -> dict:
-            return stats.generate_scorecard(service_name)
-
-        @self.app.get("/_agentbreak/requests")
-        async def get_recent_requests() -> dict:
-            service_stats = stats.get_service_stats(service_name)
-            return {"recent_requests": service_stats.recent_requests}
+        setup_health_routes(self.app, self.config.name)
+        setup_metrics_routes(self.app, self.config.name, self.stats)
 
     def get_app(self) -> FastAPI:
         """Return the FastAPI application."""

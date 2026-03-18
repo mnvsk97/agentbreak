@@ -636,6 +636,25 @@ def start(
             _mcp_proxy.print_scorecard()
 
 
+@cli.command("run")
+def run_multi_service(
+    config_file: Path = typer.Option(
+        Path("config.yaml"),
+        "--config-file",
+        "-c",
+        help="Path to multi-service config YAML file.",
+        exists=False,
+    ),
+) -> None:
+    """Run multiple AgentBreak services from a config file."""
+    from agentbreak.config import load_config  # noqa: PLC0415
+    from agentbreak.runner import MultiServiceRunner  # noqa: PLC0415
+
+    cfg = load_config(config_file)
+    runner = MultiServiceRunner(cfg)
+    asyncio.run(runner.start())
+
+
 def _register_mcp_subcommands() -> None:
     from agentbreak import mcp_proxy as _mcp_proxy_module  # noqa: PLC0415
     cli.add_typer(_mcp_proxy_module.cli, name="mcp")

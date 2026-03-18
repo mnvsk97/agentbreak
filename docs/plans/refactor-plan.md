@@ -1461,11 +1461,11 @@ fault:
 - [x] Move protocol definitions to `protocols/`
 
 ### Phase 4: Multi-Service Support (Week 3)
-- [ ] Implement `agentbreak/runner.py`
-- [ ] Implement `api/` module for common routes
-- [ ] Update CLI to use MultiServiceRunner
-- [ ] Write tests for multi-service scenarios
-- [ ] Update documentation
+- [x] Implement `agentbreak/runner.py`
+- [x] Implement `api/` module for common routes
+- [x] Update CLI to use MultiServiceRunner
+- [x] Write tests for multi-service scenarios
+- [x] Update documentation
 
 ### Phase 5: Configuration & Scenarios (Week 4)
 - [ ] Implement scenario loading system
