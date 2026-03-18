@@ -784,7 +784,7 @@ class TestNewArchitecturePerformance:
 
         assert elapsed < 5.0
         # With 50% rate, expect roughly 40-60 faults
-        scorecard = client.get("/_agentbreak/scorecard").json()
+        scorecard = client.get("/_agentbreak/test-openai/scorecard").json()
         assert scorecard["requests_seen"] == n
 
     def test_stats_tracker_scales_with_requests(self):

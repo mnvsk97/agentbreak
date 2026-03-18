@@ -151,7 +151,7 @@ def test_openai_service_scorecard() -> None:
         json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
     )
 
-    resp = client.get("/_agentbreak/scorecard")
+    resp = client.get("/_agentbreak/test-openai/scorecard")
     assert resp.status_code == 200
     data = resp.json()
     assert data["requests_seen"] == 1
@@ -170,7 +170,7 @@ def test_openai_service_recent_requests() -> None:
         json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
     )
 
-    resp = client.get("/_agentbreak/requests")
+    resp = client.get("/_agentbreak/test-openai/requests")
     assert resp.status_code == 200
     assert len(resp.json()["recent_requests"]) == 1
 
@@ -210,7 +210,7 @@ def test_openai_service_stats_track_faults() -> None:
 
     client.post("/v1/chat/completions", json={"model": "gpt-4", "messages": []})
 
-    scorecard = client.get("/_agentbreak/scorecard").json()
+    scorecard = client.get("/_agentbreak/test-openai/scorecard").json()
     assert scorecard["injected_faults"] == 1
     assert scorecard["upstream_failures"] == 1
 
@@ -419,7 +419,7 @@ def test_mcp_service_scorecard() -> None:
 
     client.post("/mcp", content=_mcp_body("initialize", 1))
 
-    resp = client.get("/_agentbreak/scorecard")
+    resp = client.get("/_agentbreak/test-mcp/scorecard")
     assert resp.status_code == 200
     data = resp.json()
     assert data["requests_seen"] == 1

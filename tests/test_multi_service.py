@@ -89,7 +89,7 @@ def test_setup_metrics_routes_scorecard():
     stats = StatisticsTracker()
     setup_metrics_routes(app, "svc", stats)
     client = TestClient(app)
-    resp = client.get("/_agentbreak/scorecard")
+    resp = client.get("/_agentbreak/svc/scorecard")
     assert resp.status_code == 200
     data = resp.json()
     assert "requests_seen" in data
@@ -101,7 +101,7 @@ def test_setup_metrics_routes_requests():
     stats = StatisticsTracker()
     setup_metrics_routes(app, "svc", stats)
     client = TestClient(app)
-    resp = client.get("/_agentbreak/requests")
+    resp = client.get("/_agentbreak/svc/requests")
     assert resp.status_code == 200
     assert "recent_requests" in resp.json()
 
@@ -114,7 +114,7 @@ def test_metrics_routes_reflect_stats():
     stats.record_request("svc", b"req-1", "test")
     stats.record_success("svc")
     client = TestClient(app)
-    resp = client.get("/_agentbreak/scorecard")
+    resp = client.get("/_agentbreak/svc/scorecard")
     assert resp.json()["requests_seen"] == 1
     assert resp.json()["upstream_successes"] == 1
 
@@ -136,10 +136,10 @@ def test_base_service_common_routes_via_api_module():
     assert resp.status_code == 200
     assert resp.json()["service"] == "test-openai"
 
-    resp = client.get("/_agentbreak/scorecard")
+    resp = client.get("/_agentbreak/test-openai/scorecard")
     assert resp.status_code == 200
 
-    resp = client.get("/_agentbreak/requests")
+    resp = client.get("/_agentbreak/test-openai/requests")
     assert resp.status_code == 200
 
 
