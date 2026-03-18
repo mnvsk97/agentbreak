@@ -61,7 +61,7 @@ class HTTPTransport(MCPTransport):
             raise RuntimeError(f"HTTP upstream error: {exc}") from exc
         try:
             return response.json()
-        except (json.JSONDecodeError, ValueError, AttributeError, Exception) as exc:
+        except (json.JSONDecodeError, ValueError, AttributeError) as exc:
             raise RuntimeError(f"HTTP upstream returned non-JSON response: {exc}") from exc
 
     async def stop(self) -> None:

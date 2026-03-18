@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from agentbreak.core.fault_injection import FaultResult
 from agentbreak.core.proxy import BaseProxy, ProxyContext
-from agentbreak.protocols.mcp import MCPError, MCPRequest, MCPResponse, PARSE_ERROR
+from agentbreak.protocols.mcp import METHOD_NOT_FOUND, MCPError, MCPRequest, MCPResponse, PARSE_ERROR
 from agentbreak.services.base import BaseService
 from agentbreak.transports import create_transport
 
@@ -107,10 +107,16 @@ class MCPProxy(BaseProxy):
                 ).to_dict(),
             )
 
-        result = self._generate_mock_result(mcp_req)
+        result_or_error = self._generate_mock_result(mcp_req)
+        # Check if the result contains an error and handle accordingly
+        if "error" in result_or_error:
+            return JSONResponse(
+                status_code=200,
+                content=MCPResponse(id=mcp_req.id, error=MCPError(**result_or_error["error"])).to_dict(),
+            )
         return JSONResponse(
             status_code=200,
-            content=MCPResponse(id=mcp_req.id, result=result).to_dict(),
+            content=MCPResponse(id=mcp_req.id, result=result_or_error).to_dict(),
         )
 
     def _generate_mock_result(self, request: MCPRequest) -> dict[str, Any]:
@@ -154,7 +160,9 @@ class MCPProxy(BaseProxy):
                     }
                 ],
             }
-        return {}
+        return {
+            "error": {"code": METHOD_NOT_FOUND, "message": f"Unknown method: {request.method}"}
+        }
 
     async def _proxy_mcp(self, context: ProxyContext) -> Response:
         if self._transport is None:

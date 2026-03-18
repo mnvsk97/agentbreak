@@ -333,7 +333,9 @@ def test_mcp_service_unknown_method_returns_empty() -> None:
     resp = client.post("/mcp", content=_mcp_body("unknown/method", 8))
     assert resp.status_code == 200
     data = resp.json()
-    assert data["result"] == {}
+    assert "error" in data
+    assert data["error"]["code"] == -32601  # METHOD_NOT_FOUND
+    assert "unknown/method" in data["error"]["message"]
 
 
 def test_mcp_service_health_check() -> None:

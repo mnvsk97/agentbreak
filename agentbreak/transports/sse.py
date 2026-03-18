@@ -171,9 +171,10 @@ class SSETransport(MCPTransport):
         """Cancel the SSE listener and close the HTTP client."""
         if self._sse_task is not None:
             self._sse_task.cancel()
-            result = await asyncio.gather(self._sse_task, return_exceptions=True)
-            if isinstance(result[0], Exception):
-                logger.warning("Exception during SSE task cancellation: %s", result[0])
+            try:
+                await asyncio.wait_for(asyncio.gather(self._sse_task, return_exceptions=True), timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
             self._sse_task = None
         if self._client is not None:
             await self._client.aclose()

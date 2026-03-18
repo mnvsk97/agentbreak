@@ -356,7 +356,7 @@ def test_http_transport_connection_error_raises_runtime_error() -> None:
 
 def test_http_transport_non_json_response_raises() -> None:
     mock_response = MagicMock()
-    mock_response.json.side_effect = Exception("not json")
+    mock_response.json.side_effect = json.JSONDecodeError("not json", "data", 0)
 
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_response)

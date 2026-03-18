@@ -62,6 +62,9 @@ _HTTP_TO_MCP: dict[int, tuple[int, str]] = {
     503: (INTERNAL_ERROR, "Service unavailable injected by AgentBreak."),
 }
 
+# Separate random instance for fault injection to avoid affecting global random state
+_fault_random = random.Random()
+
 
 _DEFAULT_MOCK_TOOLS: tuple[dict[str, Any], ...] = (
     {
@@ -197,7 +200,7 @@ def clamp_probability(value: float) -> float:
 
 
 def should_inject(probability: float) -> bool:
-    return random.random() < clamp_probability(probability)
+    return _fault_random.random() < clamp_probability(probability)
 
 
 def _get_config() -> MCPConfig:
@@ -212,7 +215,7 @@ def pick_mcp_error() -> MCPError:
     if not config.fault_codes:
         # If no fault codes configured, return a default error
         return MCPError(code=INTERNAL_ERROR, message="Fault injected by AgentBreak.")
-    http_code = random.choice(config.fault_codes)
+    http_code = _fault_random.choice(config.fault_codes)
     entry = _HTTP_TO_MCP.get(http_code, (INTERNAL_ERROR, f"Fault injected by AgentBreak (code {http_code})."))
     mcp_code, message = entry
     return MCPError(code=mcp_code, message=message)
@@ -263,7 +266,7 @@ async def maybe_delay() -> None:
         return
     async with mcp_stats._lock:
         mcp_stats.latency_injections += 1
-    delay = random.uniform(config.latency_min, config.latency_max)
+    delay = _fault_random.uniform(config.latency_min, config.latency_max)
     await asyncio.sleep(delay)
 
 
@@ -952,6 +955,9 @@ def start(
     else:
         resolved_fault_codes = scenario_config.get("mcp_error_codes", DEFAULT_FAULT_CODES)
 
+    resolved_fault_methods = scenario_config.get("mcp_fault_methods")
+    resolved_latency_methods = scenario_config.get("mcp_latency_methods")
+
     mcp_config = MCPConfig(
         mode=mode,
         upstream_url=upstream_url,
@@ -964,6 +970,8 @@ def start(
         latency_min=latency_min,
         latency_max=latency_max,
         seed=seed,
+        fault_methods=tuple(resolved_fault_methods) if resolved_fault_methods is not None else None,
+        latency_methods=tuple(resolved_latency_methods) if resolved_latency_methods is not None else None,
     )
     mcp_stats = MCPStats()
     _stdio_transport = None
@@ -972,7 +980,8 @@ def start(
     _response_cache = {}
 
     if mcp_config.seed is not None:
-        random.seed(mcp_config.seed)
+        global _fault_random
+        _fault_random = random.Random(mcp_config.seed)
 
     install_signal_handlers()
     try:
@@ -981,21 +990,30 @@ def start(
         # Cleanup resources
         # Use the running event loop instead of asyncio.run() to avoid:
         # RuntimeError: asyncio.run() cannot be called from a running event loop
-        loop = asyncio.get_running_loop()
-        cleanup_tasks = []
-        if _upstream_http_client is not None:
-            cleanup_tasks.append(_upstream_http_client.aclose())
-        if _stdio_transport is not None:
-            cleanup_tasks.append(_stdio_transport.stop())
-        if _sse_transport is not None:
-            cleanup_tasks.append(_sse_transport.stop())
-        if cleanup_tasks:
-            loop.run_until_complete(asyncio.gather(*cleanup_tasks, return_exceptions=True))
-        _upstream_http_client = None
-        _stdio_transport = None
-        _sse_transport = None
-        _response_cache.clear()
-        print_scorecard()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Event loop already closed, skip async cleanup
+            _upstream_http_client = None
+            _stdio_transport = None
+            _sse_transport = None
+            _response_cache.clear()
+            print_scorecard()
+        else:
+            cleanup_tasks = []
+            if _upstream_http_client is not None:
+                cleanup_tasks.append(_upstream_http_client.aclose())
+            if _stdio_transport is not None:
+                cleanup_tasks.append(_stdio_transport.stop())
+            if _sse_transport is not None:
+                cleanup_tasks.append(_sse_transport.stop())
+            if cleanup_tasks:
+                loop.run_until_complete(asyncio.gather(*cleanup_tasks, return_exceptions=True))
+            _upstream_http_client = None
+            _stdio_transport = None
+            _sse_transport = None
+            _response_cache.clear()
+            print_scorecard()
 
 
 async def _send_one_request(

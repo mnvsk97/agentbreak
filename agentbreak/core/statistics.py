@@ -62,6 +62,10 @@ class StatisticsTracker:
                 {"fingerprint": fingerprint, "count": seen, "method": method}
             )
 
+            # Evict fingerprints if cache grows too large to prevent DoS via memory exhaustion
+            if len(stats.seen_fingerprints) > 10000:
+                stats.seen_fingerprints.clear()
+
     async def record_fault(self, service_name: str) -> None:
         """Record an injected fault."""
         stats = self.get_service_stats(service_name)
