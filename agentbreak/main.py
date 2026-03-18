@@ -634,7 +634,9 @@ def start(
         _mcp_proxy._response_cache = {}
         global _mcp_app_mounted
         if not _mcp_app_mounted:
-            app.mount("/", _mcp_proxy.app)
+            # Mount MCP proxy at /mcp/ to avoid conflicts with OpenAI routes
+            # Routes become: /mcp/mcp, /mcp/healthz, /mcp/_agentbreak/mcp/scorecard, etc.
+            app.mount("/mcp/", _mcp_proxy.app)
             _mcp_app_mounted = True
     install_signal_handlers()
     try:

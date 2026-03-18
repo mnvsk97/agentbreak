@@ -332,6 +332,25 @@ agentbreak mcp list-tools [--url URL] [--transport http|stdio] [--command CMD]
 agentbreak mcp call-tool TOOL [--args JSON] [--url URL] [--transport http|stdio]
 ```
 
+### Using MCP with `agentbreak start`
+
+You can also enable MCP mode on the main AgentBreak server using `--mcp-mode`:
+
+```bash
+# Run OpenAI proxy with MCP mock mode on the same server
+agentbreak start --mode mock --mcp-mode mock --port 5000
+
+# Run OpenAI proxy with MCP proxy mode
+agentbreak start --mode proxy --upstream-url https://api.openai.com \
+  --mcp-mode proxy --mcp-upstream-url http://localhost:8080
+```
+
+When using `agentbreak start --mcp-mode`, MCP endpoints are mounted under `/mcp/`:
+- `/mcp/mcp` - MCP JSON-RPC endpoint
+- `/mcp/healthz` - MCP health check
+- `/mcp/_agentbreak/mcp/scorecard` - MCP scorecard
+- `/mcp/_agentbreak/mcp/tool-calls` - Tool call tracking
+
 ### MCP Useful Endpoints
 
 ```bash

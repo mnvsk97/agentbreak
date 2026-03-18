@@ -273,7 +273,6 @@ async def test_sse_listen_sse_resolves_pending_future():
     msg = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})
 
     # Directly call the parsing logic
-    event_type = "message"
     data = msg
     parsed = json.loads(data)
     req_id = parsed.get("id")
@@ -303,7 +302,8 @@ async def test_sse_listen_sse_endpoint_url_relative():
 @pytest.mark.asyncio
 async def test_sse_listen_sse_malformed_json_logged(capsys):
     """_listen_sse: malformed JSON in message event prints warning and continues."""
-    t = SSETransport(base_url="http://localhost:9999")
+    # Create SSE transport instance for consistency
+    SSETransport(base_url="http://localhost:9999")
     import json as _json
 
     # Simulate malformed JSON handling
