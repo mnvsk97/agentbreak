@@ -1446,12 +1446,12 @@ fault:
 - [x] Update `pyproject.toml` with new dependencies (pydantic)
 
 ### Phase 2: Core Proxy Logic (Week 2)
-- [ ] Implement `core/proxy.py` (BaseProxy)
-- [ ] Implement `core/fault_injection.py`
-- [ ] Implement `core/latency.py`
-- [ ] Write unit tests for core components
-- [ ] Refactor `utils/` module
-- [ ] Move `mcp_transport.py` to `transports/` directory
+- [x] Implement `core/proxy.py` (BaseProxy)
+- [x] Implement `core/fault_injection.py`
+- [x] Implement `core/latency.py`
+- [x] Write unit tests for core components
+- [x] Refactor `utils/` module
+- [x] Move `mcp_transport.py` to `transports/` directory
 
 ### Phase 3: Service Implementations (Week 2-3)
 - [ ] Implement `services/base.py`

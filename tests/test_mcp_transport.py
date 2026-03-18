@@ -120,7 +120,7 @@ def test_stdio_transport_send_request_success() -> None:
 
     async def _run() -> None:
         with patch(
-            "agentbreak.mcp_transport.asyncio.create_subprocess_exec",
+            "agentbreak.transports.stdio.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=mock_process),
         ):
             transport = StdioTransport(command=("fake-server",), timeout=5.0)
@@ -147,7 +147,7 @@ def test_stdio_transport_timeout_raises() -> None:
 
     async def _run() -> None:
         with patch(
-            "agentbreak.mcp_transport.asyncio.create_subprocess_exec",
+            "agentbreak.transports.stdio.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=mock_process),
         ):
             transport = StdioTransport(command=("fake-server",), timeout=0.01)
@@ -181,7 +181,7 @@ def test_stdio_transport_reconnects_on_empty_response() -> None:
 
     async def _run() -> None:
         with patch(
-            "agentbreak.mcp_transport.asyncio.create_subprocess_exec",
+            "agentbreak.transports.stdio.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=mock_process),
         ):
             transport = StdioTransport(command=("fake-server",), timeout=5.0)
@@ -215,7 +215,7 @@ def test_stdio_transport_start_creates_process() -> None:
 
     async def _run() -> None:
         with patch(
-            "agentbreak.mcp_transport.asyncio.create_subprocess_exec",
+            "agentbreak.transports.stdio.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=mock_process),
         ) as mock_exec:
             transport = StdioTransport(command=("my-server", "--flag"), timeout=5.0)
@@ -259,7 +259,7 @@ def test_sse_transport_start_resolves_endpoint() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = SSETransport(base_url="http://localhost:9000", timeout=5.0)
             await transport.start()
             assert transport._endpoint_url == "http://localhost:9000/messages"
@@ -326,7 +326,7 @@ def test_http_transport_send_request_success() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = HTTPTransport(base_url="http://upstream:8080", timeout=5.0)
             req = make_request("tools/list", req_id=1)
             result = await transport.send_request(req)
@@ -345,7 +345,7 @@ def test_http_transport_connection_error_raises_runtime_error() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = HTTPTransport(base_url="http://upstream:8080", timeout=5.0)
             req = make_request("tools/list", req_id=1)
             with pytest.raises(RuntimeError, match="HTTP upstream error"):
@@ -363,7 +363,7 @@ def test_http_transport_non_json_response_raises() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = HTTPTransport(base_url="http://upstream:8080", timeout=5.0)
             req = make_request("tools/list", req_id=1)
             with pytest.raises(RuntimeError, match="non-JSON"):
@@ -382,7 +382,7 @@ def test_http_transport_extra_headers_sent() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = HTTPTransport(
                 base_url="http://upstream:8080",
                 timeout=5.0,
@@ -402,7 +402,7 @@ def test_http_transport_stop() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = HTTPTransport(base_url="http://upstream:8080", timeout=5.0)
             await transport.start()
             assert transport._started
@@ -425,7 +425,7 @@ def test_http_transport_lazy_start() -> None:
     mock_client.aclose = AsyncMock()
 
     async def _run() -> None:
-        with patch("agentbreak.mcp_transport.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentbreak.transports.http.httpx.AsyncClient", return_value=mock_client):
             transport = HTTPTransport(base_url="http://upstream:8080", timeout=5.0)
             assert not transport._started
             req = make_request("tools/list", req_id=1)
