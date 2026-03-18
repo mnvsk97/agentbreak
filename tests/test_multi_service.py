@@ -106,12 +106,12 @@ def test_setup_metrics_routes_requests():
     assert "recent_requests" in resp.json()
 
 
-def test_metrics_routes_reflect_stats():
+async def test_metrics_routes_reflect_stats():
     app = FastAPI()
     stats = StatisticsTracker()
     setup_metrics_routes(app, "svc", stats)
     # Record some activity
-    stats.record_request("svc", b"req-1", "test")
+    await stats.record_request("svc", b"req-1", "test")
     stats.record_success("svc")
     client = TestClient(app)
     resp = client.get("/_agentbreak/svc/scorecard")

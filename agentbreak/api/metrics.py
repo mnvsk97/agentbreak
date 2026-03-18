@@ -21,4 +21,4 @@ def setup_metrics_routes(
     @app.get(f"/_agentbreak/{service_name}/requests")
     async def get_recent_requests() -> dict:
         service_stats = stats.get_service_stats(service_name)
-        return {"recent_requests": service_stats.recent_requests}
+        return {"recent_requests": list(service_stats.recent_requests)}

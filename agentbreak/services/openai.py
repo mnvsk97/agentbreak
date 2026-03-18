@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import httpx
+import logging
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
@@ -12,6 +13,8 @@ from agentbreak.core.proxy import BaseProxy, ProxyContext
 from agentbreak.core.statistics import StatisticsTracker
 from agentbreak.services.base import BaseService
 from agentbreak.utils.headers import filter_headers
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIProxy(BaseProxy):
@@ -72,11 +75,12 @@ class OpenAIProxy(BaseProxy):
                     headers=filter_headers(request.headers),
                 )
             except httpx.HTTPError as exc:
+                logger.error("Upstream connection error: %s", exc)
                 return JSONResponse(
                     status_code=502,
                     content={
                         "error": {
-                            "message": f"AgentBreak could not reach upstream: {exc}",
+                            "message": "AgentBreak could not reach upstream service",
                             "type": "upstream_connection_error",
                             "code": 502,
                         }

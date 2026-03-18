@@ -35,14 +35,11 @@ class MultiServiceRunner:
 
     async def start(self) -> None:
         """Start all configured services concurrently."""
-        created_services: list[tuple[str, BaseProxy]] = []
-
         try:
             for service_config in self.config.services:
                 service = self.create_service(service_config)
                 service.setup_routes()
                 self.services[service_config.name] = service
-                created_services.append((service_config.name, service))
 
             tasks = []
             for service_config in self.config.services:

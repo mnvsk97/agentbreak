@@ -7,7 +7,7 @@ import random
 import shlex
 import signal
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -103,7 +103,9 @@ class Stats:
     duplicate_requests: int = 0
     suspected_loops: int = 0
     seen_fingerprints: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    recent_requests: list[dict[str, Any]] = field(default_factory=list)
+    recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=20))
+    # Lock for thread-safe updates to shared state
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 config: Config | None = None
@@ -265,23 +267,22 @@ def fingerprint_request(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
-def record_request(body: bytes) -> None:
-    stats.total_requests += 1
-    fingerprint = fingerprint_request(body)
-    stats.seen_fingerprints[fingerprint] += 1
-    seen = stats.seen_fingerprints[fingerprint]
-    if seen > 1:
-        stats.duplicate_requests += 1
-    if seen > 2:
-        stats.suspected_loops += 1
-    payload: Any
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        payload = {"raw": body.decode("utf-8", errors="replace")}
-    stats.recent_requests.append({"fingerprint": fingerprint, "count": seen, "body": payload})
-    if len(stats.recent_requests) > 20:
-        stats.recent_requests.pop(0)
+async def record_request(body: bytes) -> None:
+    async with stats._lock:
+        stats.total_requests += 1
+        fingerprint = fingerprint_request(body)
+        stats.seen_fingerprints[fingerprint] += 1
+        seen = stats.seen_fingerprints[fingerprint]
+        if seen > 1:
+            stats.duplicate_requests += 1
+        if seen > 2:
+            stats.suspected_loops += 1
+        payload: Any
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {"raw": body.decode("utf-8", errors="replace")}
+        stats.recent_requests.append({"fingerprint": fingerprint, "count": seen, "body": payload})
 
 
 def scorecard_data() -> dict[str, Any]:
@@ -347,7 +348,7 @@ async def maybe_delay() -> None:
 async def proxy_chat_completions(request: Request) -> Response:
     assert config is not None
     body = await request.body()
-    record_request(body)
+    await record_request(body)
 
     if should_inject(config.fail_rate):
         status_code = pick_error_code()
@@ -404,7 +405,7 @@ def current_scorecard() -> dict[str, Any]:
 
 
 def current_requests() -> dict[str, Any]:
-    return {"recent_requests": stats.recent_requests}
+    return {"recent_requests": list(stats.recent_requests)}
 
 
 @app.get("/_agentbreak/scorecard")
@@ -617,6 +618,7 @@ def start(
             seed=resolved_seed,
             fault_methods=resolved_mcp_fault_methods,
             latency_methods=resolved_mcp_latency_methods,
+            cache_ttl=60.0,
         )
         _mcp_proxy.mcp_stats = _mcp_proxy.MCPStats()
         _mcp_proxy._stdio_transport = None

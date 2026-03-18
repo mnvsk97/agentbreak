@@ -195,9 +195,16 @@ def should_inject(probability: float) -> bool:
     return random.random() < clamp_probability(probability)
 
 
+def _get_config() -> MCPConfig:
+    """Get the MCP config, raising an error if not configured."""
+    if mcp_config is None:
+        raise RuntimeError("MCP proxy is not configured. Ensure the MCP mode is enabled and configuration is complete.")
+    return mcp_config
+
+
 def pick_mcp_error() -> MCPError:
-    assert mcp_config is not None
-    http_code = random.choice(mcp_config.fault_codes)
+    config = _get_config()
+    http_code = random.choice(config.fault_codes)
     entry = _HTTP_TO_MCP.get(http_code, (INTERNAL_ERROR, f"Fault injected by AgentBreak (code {http_code})."))
     mcp_code, message = entry
     return MCPError(code=mcp_code, message=message)
@@ -242,11 +249,11 @@ def record_mcp_request(mcp_req: MCPRequest, raw_body: bytes) -> None:
 
 
 async def maybe_delay() -> None:
-    assert mcp_config is not None
-    if not should_inject(mcp_config.latency_p):
+    config = _get_config()
+    if not should_inject(config.latency_p):
         return
     mcp_stats.latency_injections += 1
-    delay = random.uniform(mcp_config.latency_min, mcp_config.latency_max)
+    delay = random.uniform(config.latency_min, config.latency_max)
     await asyncio.sleep(delay)
 
 
@@ -270,18 +277,18 @@ def _get_from_cache(method: str, params: dict[str, Any] | None) -> dict[str, Any
 
 def _put_in_cache(method: str, params: dict[str, Any] | None, result: dict[str, Any]) -> None:
     """Store a result in the response cache with the configured TTL."""
-    assert mcp_config is not None
+    config = _get_config()
     key = _cache_key(method, params)
-    _response_cache[key] = (result, time.monotonic() + mcp_config.cache_ttl)
+    _response_cache[key] = (result, time.monotonic() + config.cache_ttl)
 
 
 async def _get_upstream_http_client() -> httpx.AsyncClient:
     """Return the shared upstream HTTP client, creating it on first call."""
     global _upstream_http_client
-    assert mcp_config is not None
+    config = _get_config()
     if _upstream_http_client is None:
         _upstream_http_client = httpx.AsyncClient(
-            timeout=mcp_config.upstream_timeout,
+            timeout=config.upstream_timeout,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         mcp_stats.http_pool_size = 20
@@ -480,11 +487,11 @@ async def _forward_http(
     Returns (response, transport_success) where transport_success is False only when
     we could not reach the upstream at all (network error or non-2xx HTTP status).
     """
-    assert mcp_config is not None
+    config = _get_config()
     client = await _get_upstream_http_client()
     try:
         response = await client.post(
-            f"{mcp_config.upstream_url.rstrip('/')}/mcp",
+            f"{config.upstream_url.rstrip('/')}/mcp",
             content=body,
             headers=filter_headers(http_request.headers),
         )
@@ -526,11 +533,11 @@ async def _forward_stdio(mcp_req: MCPRequest) -> tuple[JSONResponse, bool]:
     the subprocess raised a transport-level exception.
     """
     global _stdio_transport
-    assert mcp_config is not None
+    config = _get_config()
     if _stdio_transport is None:
         _stdio_transport = StdioTransport(
-            command=mcp_config.upstream_command,
-            timeout=mcp_config.upstream_timeout,
+            command=config.upstream_command,
+            timeout=config.upstream_timeout,
         )
     try:
         result = await _stdio_transport.send_request(mcp_req)
@@ -558,11 +565,11 @@ async def _forward_sse(mcp_req: MCPRequest) -> tuple[JSONResponse, bool]:
     the SSE transport raised a transport-level exception.
     """
     global _sse_transport
-    assert mcp_config is not None
+    config = _get_config()
     if _sse_transport is None:
         _sse_transport = SSETransport(
-            base_url=mcp_config.upstream_url,
-            timeout=mcp_config.upstream_timeout,
+            base_url=config.upstream_url,
+            timeout=config.upstream_timeout,
         )
     try:
         result = await _sse_transport.send_request(mcp_req)
@@ -599,7 +606,7 @@ async def _process_single_mcp_request(
     """Process one parsed JSON-RPC request dict and return a response dict."""
     if not isinstance(raw, dict):
         return mcp_error_response(None, MCPError(code=INVALID_REQUEST, message="Invalid Request: batch items must be JSON objects"))
-    assert mcp_config is not None
+    _get_config()  # Validate config is set
     start_time = time.monotonic()
 
     # Phase 1: Parse request
@@ -707,7 +714,7 @@ async def _process_single_mcp_request(
 
 @app.post("/mcp")
 async def proxy_mcp(request: Request) -> JSONResponse:
-    assert mcp_config is not None
+    _get_config()  # Validate config is set
     body = await request.body()
 
     try:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,9 +23,11 @@ class ServiceStatistics:
     suspected_loops: int = 0
     method_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     seen_fingerprints: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    recent_requests: list[dict[str, Any]] = field(default_factory=list)
+    recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=20))
     total_processing_time_ms: float = 0.0
     session_start_time: float = field(default_factory=time.monotonic)
+    # Lock for thread-safe updates to shared state
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class StatisticsTracker:
@@ -39,26 +42,25 @@ class StatisticsTracker:
             self.services[service_name] = ServiceStatistics()
         return self.services[service_name]
 
-    def record_request(self, service_name: str, raw_body: bytes, method: str = "unknown") -> None:
+    async def record_request(self, service_name: str, raw_body: bytes, method: str = "unknown") -> None:
         """Record an incoming request and detect duplicates/loops."""
         stats = self.get_service_stats(service_name)
-        stats.total_requests += 1
+        async with stats._lock:
+            stats.total_requests += 1
 
-        fingerprint = hashlib.sha256(raw_body).hexdigest()
-        stats.seen_fingerprints[fingerprint] += 1
-        seen = stats.seen_fingerprints[fingerprint]
+            fingerprint = hashlib.sha256(raw_body).hexdigest()
+            stats.seen_fingerprints[fingerprint] += 1
+            seen = stats.seen_fingerprints[fingerprint]
 
-        if seen > 1:
-            stats.duplicate_requests += 1
-        if seen > 2:
-            stats.suspected_loops += 1
+            if seen > 1:
+                stats.duplicate_requests += 1
+            if seen > 2:
+                stats.suspected_loops += 1
 
-        stats.method_counts[method] += 1
-        stats.recent_requests.append(
-            {"fingerprint": fingerprint, "count": seen, "method": method}
-        )
-        if len(stats.recent_requests) > 20:
-            stats.recent_requests.pop(0)
+            stats.method_counts[method] += 1
+            stats.recent_requests.append(
+                {"fingerprint": fingerprint, "count": seen, "method": method}
+            )
 
     def record_fault(self, service_name: str) -> None:
         """Record an injected fault."""
@@ -117,6 +119,7 @@ class StatisticsTracker:
             "duplicate_requests": stats.duplicate_requests,
             "suspected_loops": stats.suspected_loops,
             "method_counts": dict(stats.method_counts),
+            "recent_requests": list(stats.recent_requests),
             "run_outcome": outcome,
             "resilience_score": score,
             "avg_processing_ms": avg_processing_ms,

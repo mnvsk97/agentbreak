@@ -54,7 +54,7 @@ class BaseProxy(ABC):
         body = await request.body()
         context = await self._create_context(request, body)
 
-        self.stats.record_request(
+        await self.stats.record_request(
             context.service_name,
             context.raw_body,
             method=context.metadata.get("method", "unknown"),

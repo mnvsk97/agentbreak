@@ -787,13 +787,13 @@ class TestNewArchitecturePerformance:
         scorecard = client.get("/_agentbreak/test-openai/scorecard").json()
         assert scorecard["requests_seen"] == n
 
-    def test_stats_tracker_scales_with_requests(self):
+    async def test_stats_tracker_scales_with_requests(self):
         """StatisticsTracker handles 1000 requests without significant overhead."""
         stats = StatisticsTracker()
         n = 1000
         start = time.monotonic()
         for i in range(n):
-            stats.record_request("svc", f"req-{i}".encode(), "chat/completions")
+            await stats.record_request("svc", f"req-{i}".encode(), "chat/completions")
             stats.record_success("svc")
         elapsed = time.monotonic() - start
 

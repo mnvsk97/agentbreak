@@ -138,30 +138,30 @@ async def test_latency_injector_always_injects() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_statistics_tracker_record_request() -> None:
+async def test_statistics_tracker_record_request() -> None:
     tracker = StatisticsTracker()
-    tracker.record_request("svc", b"body", method="POST")
+    await tracker.record_request("svc", b"body", method="POST")
     stats = tracker.get_service_stats("svc")
     assert stats.total_requests == 1
     assert stats.duplicate_requests == 0
 
 
-def test_statistics_tracker_detects_duplicates() -> None:
+async def test_statistics_tracker_detects_duplicates() -> None:
     tracker = StatisticsTracker()
     body = b"same-body"
-    tracker.record_request("svc", body)
-    tracker.record_request("svc", body)
+    await tracker.record_request("svc", body)
+    await tracker.record_request("svc", body)
     stats = tracker.get_service_stats("svc")
     assert stats.total_requests == 2
     assert stats.duplicate_requests == 1
     assert stats.suspected_loops == 0
 
 
-def test_statistics_tracker_detects_loops() -> None:
+async def test_statistics_tracker_detects_loops() -> None:
     tracker = StatisticsTracker()
     body = b"loop-body"
     for _ in range(3):
-        tracker.record_request("svc", body)
+        await tracker.record_request("svc", body)
     stats = tracker.get_service_stats("svc")
     assert stats.suspected_loops == 1
 
@@ -181,38 +181,38 @@ def test_statistics_tracker_record_latency() -> None:
     assert stats.latency_injections == 1
 
 
-def test_statistics_tracker_scorecard_pass() -> None:
+async def test_statistics_tracker_scorecard_pass() -> None:
     tracker = StatisticsTracker()
-    tracker.record_request("svc", b"body")
+    await tracker.record_request("svc", b"body")
     tracker.record_success("svc")
     card = tracker.generate_scorecard("svc")
     assert card["run_outcome"] == "PASS"
     assert card["resilience_score"] == 100
 
 
-def test_statistics_tracker_scorecard_fail() -> None:
+async def test_statistics_tracker_scorecard_fail() -> None:
     tracker = StatisticsTracker()
-    tracker.record_request("svc", b"body")
+    await tracker.record_request("svc", b"body")
     tracker.record_fault("svc")
     card = tracker.generate_scorecard("svc")
     assert card["run_outcome"] == "FAIL"
     assert card["resilience_score"] < 100
 
 
-def test_statistics_tracker_scorecard_degraded() -> None:
+async def test_statistics_tracker_scorecard_degraded() -> None:
     tracker = StatisticsTracker()
-    tracker.record_request("svc", b"a")
+    await tracker.record_request("svc", b"a")
     tracker.record_success("svc")
-    tracker.record_request("svc", b"b")
+    await tracker.record_request("svc", b"b")
     tracker.record_fault("svc")
     card = tracker.generate_scorecard("svc")
     assert card["run_outcome"] == "DEGRADED"
 
 
-def test_statistics_tracker_separate_services() -> None:
+async def test_statistics_tracker_separate_services() -> None:
     tracker = StatisticsTracker()
-    tracker.record_request("svc1", b"body1")
-    tracker.record_request("svc2", b"body2")
+    await tracker.record_request("svc1", b"body1")
+    await tracker.record_request("svc2", b"body2")
     assert tracker.get_service_stats("svc1").total_requests == 1
     assert tracker.get_service_stats("svc2").total_requests == 1
 

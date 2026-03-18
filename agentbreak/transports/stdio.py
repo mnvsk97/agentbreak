@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from agentbreak.protocols.mcp import MCPRequest
 from agentbreak.transports.base import DEFAULT_TRANSPORT_TIMEOUT, MCPTransport
+
+logger = logging.getLogger(__name__)
 
 
 class StdioTransport(MCPTransport):
@@ -104,11 +107,12 @@ class StdioTransport(MCPTransport):
                 if self._process.stdin:
                     self._process.stdin.close()
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to wait for subprocess termination (5s), killing: %s", exc)
                 self._process.kill()
                 try:
                     await asyncio.wait_for(self._process.wait(), timeout=2.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.error("Failed to kill subprocess after termination: %s", exc)
             self._process = None
         self._started = False
