@@ -366,6 +366,9 @@ class TestBuiltInMCPScenarios:
         from agentbreak.main import SCENARIOS
         return SCENARIOS[name]
 
+    # Note: These tests verify scenario configuration is correct.
+    # End-to-end behavior is tested in other test classes.
+
     def test_mcp_tool_failures_scenario_exists(self) -> None:
         s = self._get_scenario("mcp-tool-failures")
         assert s["mcp_fail_rate"] == pytest.approx(0.3)

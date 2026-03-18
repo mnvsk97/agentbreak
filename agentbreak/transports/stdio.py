@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any
 
-from agentbreak.mcp_protocol import MCPRequest
+from agentbreak.protocols.mcp import MCPRequest
 from agentbreak.transports.base import DEFAULT_TRANSPORT_TIMEOUT, MCPTransport
 
 

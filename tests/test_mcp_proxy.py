@@ -22,15 +22,16 @@ from agentbreak.mcp_protocol import (
 @pytest.fixture(autouse=True)
 def cleanup_mcp_state() -> None:
     """Ensure clean MCP state before and after each test."""
-    # Setup: clean up any existing transports
-    asyncio.run(_cleanup_all_transports())
+    # Setup: clean up any existing transports and reset all state
+    asyncio.run(_reset_all_state())
     yield
     # Teardown: clean up again
-    asyncio.run(_cleanup_all_transports())
+    asyncio.run(_reset_all_state())
 
 
-async def _cleanup_all_transports() -> None:
-    """Clean up all existing transports."""
+async def _reset_all_state() -> None:
+    """Clean up transports and reset all global state to defaults."""
+    # Clean up transports
     if mcp_proxy._stdio_transport is not None:
         try:
             await mcp_proxy._stdio_transport.stop()
@@ -50,13 +51,24 @@ async def _cleanup_all_transports() -> None:
             pass
         mcp_proxy._upstream_http_client = None
 
+    # Reset config and stats to defaults
+    mcp_proxy.mcp_config = mcp_proxy.MCPConfig(
+        mode="mock",
+        upstream_url="http://upstream.example",
+        fail_rate=0.0,
+        latency_p=0.0,
+    )
+    mcp_proxy.mcp_stats = mcp_proxy.MCPStats()
+    mcp_proxy._response_cache = {}
+
 def reset_state(
     mode: str = "mock",
     upstream_url: str = "http://upstream.example",
     fail_rate: float = 0.0,
     latency_p: float = 0.0,
 ) -> None:
-    asyncio.run(_cleanup_all_transports())
+    """Set up specific test configuration with proper cleanup."""
+    asyncio.run(_reset_all_state())
     mcp_proxy.mcp_config = mcp_proxy.MCPConfig(
         mode=mode,
         upstream_url=upstream_url,

@@ -16,7 +16,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from agentbreak.mcp_protocol import (
+from agentbreak.protocols.mcp import (
     INTERNAL_ERROR,
     INVALID_REQUEST,
     MCP_TOOL_ERROR,
@@ -27,7 +27,7 @@ from agentbreak.mcp_protocol import (
     MCPResponse,
     fingerprint_mcp_request,
 )
-from agentbreak.mcp_transport import (
+from agentbreak.transports import (
     DEFAULT_TRANSPORT_TIMEOUT,
     SSETransport,
     StdioTransport,

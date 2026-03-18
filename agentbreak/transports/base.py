@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from agentbreak.mcp_protocol import MCPRequest
+from agentbreak.protocols.mcp import MCPRequest
 
 # Default timeout for upstream requests (seconds).
 DEFAULT_TRANSPORT_TIMEOUT = 30.0

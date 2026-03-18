@@ -517,12 +517,12 @@ async def test_stdio_transport_broken_pipe_restarts():
 
     with patch.object(t, "_ensure_process", patched_ensure):
         # Second ensure call returns real cat process, but cat won't respond to our JSON
-        # So this will fail on retry path - just verify we don't get BrokenPipeError directly
+        # So this will fail on retry path - verify we don't crash from the retry logic
+        req = MCPRequest(method="tools/list", id=99)
         try:
-            req = MCPRequest(method="tools/list", id=99)
             await asyncio.wait_for(t.send_request(req), timeout=2.0)
         except (RuntimeError, TimeoutError, asyncio.TimeoutError):
-            pass  # expected - we just want no crash from the retry logic
+            pass  # Expected - transport retry logic handles failures gracefully
 
     await t.stop()
 
@@ -686,7 +686,7 @@ async def test_mcp_service_cleanup_with_transport():
 
 
 def test_mcp_service_proxy_mode_uses_transport():
-    """MCP service in proxy mode calls _proxy_mcp on requests."""
+    """MCP service in proxy mode properly handles requests and returns responses."""
     config = _make_mcp_config(
         mode="proxy",
         upstream_transport="http",
@@ -699,7 +699,7 @@ def test_mcp_service_proxy_mode_uses_transport():
     mock_transport = AsyncMock()
     mock_transport.start = AsyncMock()
     mock_transport.send_request = AsyncMock(
-        return_value={"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+        return_value={"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "test_tool"}]}}
     )
 
     client = TestClient(svc.get_app(), raise_server_exceptions=False)
@@ -709,7 +709,13 @@ def test_mcp_service_proxy_mode_uses_transport():
 
     assert resp.status_code == 200
     data = resp.json()
+    assert data["jsonrpc"] == "2.0"
+    assert data["id"] == 1
     assert "result" in data
+    assert isinstance(data["result"], dict)
+    assert "tools" in data["result"]
+    # Verify transport was actually used
+    mock_transport.send_request.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
