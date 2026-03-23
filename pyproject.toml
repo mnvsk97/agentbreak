@@ -9,6 +9,9 @@ description = "Minimal chaos proxy for OpenAI-compatible LLM apps."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+authors = [
+  { name = "AgentBreak contributors" },
+]
 keywords = ["llm", "openai", "proxy", "chaos-testing", "resilience"]
 classifiers = [
   "Development Status :: 3 - Alpha",

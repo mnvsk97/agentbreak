@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/**
+      - claude/**
   pull_request:
 
 jobs:

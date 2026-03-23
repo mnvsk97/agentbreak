@@ -11,4 +11,4 @@ Instead:
 
 AgentBreak is a testing tool that proxies and injects failures into LLM traffic, so reports involving request forwarding, credential handling, or unintended data exposure are especially useful.
 
-Until a private reporting address is published, use GitHub private maintainer contact paths if available.
+To report privately, use [GitHub's private vulnerability reporting](https://github.com/mnvsk97/agentbreak/security/advisories/new) for this repository.

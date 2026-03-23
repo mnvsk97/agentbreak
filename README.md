@@ -1,5 +1,8 @@
 # AgentBreak
 
+[![CI](https://github.com/mnvsk97/agentbreak/actions/workflows/ci.yml/badge.svg)](https://github.com/mnvsk97/agentbreak/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agentbreak)](https://pypi.org/project/agentbreak/)
+
 AgentBreak lets you test how your app behaves when an OpenAI-compatible provider is slow, flaky, or down.
 
 It sits between your app and the provider, then randomly:
