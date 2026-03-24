@@ -18,10 +18,6 @@ agentbreak serve --config application.yaml --scenarios scenarios.yaml
 
 For MCP mirroring: `agentbreak inspect --config application.yaml` then `serve`.
 
-## Slash command
-
-Project command definition: **`.claude-plugin/commands/agentbreak.md`** (install via `.claude-plugin/plugin.json`). It should stay in sync with **`README.md`**.
-
 ## Skills
 
 Bundled workflows under **`skills/`** (install via `npx skills add mnvsk97/agentbreak`):
