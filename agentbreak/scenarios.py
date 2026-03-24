@@ -175,7 +175,7 @@ class ScenarioFile(BaseModel):
 
 
 def load_scenarios(path: str | None) -> ScenarioFile:
-    candidate = Path(path) if path else Path("scenarios.yaml")
+    candidate = Path(path) if path else Path(".agentbreak/scenarios.yaml")
     if not candidate.exists():
         return ScenarioFile()
     with candidate.open("r", encoding="utf-8") as handle:

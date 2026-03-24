@@ -2,21 +2,20 @@
 
 ## What this repo is
 
-A Python package that proxies **LLM chat completions** and **MCP** traffic and injects **configurable faults** from `scenarios.yaml`. Configuration is **`application.yaml`** + **`scenarios.yaml`**, not legacy `agentbreak start` flags.
+A Python package that proxies **LLM chat completions** and **MCP** traffic and injects **configurable faults** from `scenarios.yaml`. Configuration is **`.agentbreak/application.yaml`** + **`.agentbreak/scenarios.yaml`**, created by `agentbreak init`.
 
 ## Quick commands
 
 ```bash
 pip install -e '.[dev]'
-cp config.example.yaml application.yaml
-cp scenarios.example.yaml scenarios.yaml
-# Edit application.yaml: llm.mode mock|proxy, mcp.enabled true|false
+agentbreak init
+# Edit .agentbreak/application.yaml: llm.mode mock|proxy, mcp.enabled true|false
 
-agentbreak validate --config application.yaml --scenarios scenarios.yaml
-agentbreak serve --config application.yaml --scenarios scenarios.yaml
+agentbreak validate
+agentbreak serve
 ```
 
-For MCP mirroring: `agentbreak inspect --config application.yaml` then `serve`.
+For MCP mirroring: `agentbreak inspect` then `serve`.
 
 ## Skills
 

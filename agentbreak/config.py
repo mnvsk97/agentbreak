@@ -160,7 +160,7 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
 
 
 def load_application_config(path: str | None) -> ApplicationConfig:
-    candidate = Path(path) if path else Path("application.yaml")
+    candidate = Path(path) if path else Path(".agentbreak/application.yaml")
     if not candidate.exists():
         raise FileNotFoundError(f"Config file not found: {candidate}")
     return ApplicationConfig.model_validate(_load_yaml_mapping(candidate))

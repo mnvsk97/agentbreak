@@ -1,330 +1,150 @@
 ---
 name: agentbreak-run-tests
-description: Run chaos tests against an OpenAI-compatible app or MCP server using AgentBreak. Uses application.yaml + scenarios.yaml, agentbreak serve, optional MCP inspect, and scorecard endpoints.
+description: Start the AgentBreak chaos proxy and guide the user through testing their agent against injected faults.
 ---
 
 # AgentBreak -- Run Chaos Tests
 
-You are helping the user run chaos tests against their agent using AgentBreak. AgentBreak is a local proxy that sits between an agent and its LLM/MCP backends, injecting faults defined in `scenarios.yaml`.
-
-```
-Agent  →  AgentBreak (localhost)  →  Real LLM / MCP server (or mock)
-               ↑
-          scenarios.yaml defines faults
-```
-
 ## Your job
 
-Walk the user through the full workflow: configure, inspect (if MCP), validate, serve, send traffic, read the scorecard. Do not skip steps. If something fails, diagnose and fix it before moving on.
+Start the AgentBreak chaos proxy and guide the user through testing their agent. You cannot run the user's agent directly -- you start the proxy, tell the user how to point their agent at it, and interpret the results.
 
-## Step-by-step instructions
+```
+Agent  -->  AgentBreak proxy (localhost)  -->  Real LLM / MCP server (or mock)
+                     ^
+            .agentbreak/scenarios.yaml defines faults
+```
 
-### Step 1: Install AgentBreak
+## Step-by-step
 
-Check if `agentbreak` CLI is available. If not, install it:
+### 1. Check prerequisites
 
 ```bash
-pip install agentbreak
-# Or from repo root:
-pip install -e '.[dev]'
+which agentbreak || pip install agentbreak
 ```
 
-Verify with `agentbreak --help`.
+### 2. Check .agentbreak/ exists
 
-### Step 2: Create configuration files
+If `.agentbreak/` does not exist, tell the user:
 
-If `application.yaml` and `scenarios.yaml` don't already exist in the project root, create them from the examples:
+> No `.agentbreak/` directory found. Run the **agentbreak-create-tests** skill first to analyze your codebase and generate config, or run `agentbreak init` for defaults.
+
+Do not proceed without `.agentbreak/application.yaml` and `.agentbreak/scenarios.yaml`.
+
+### 3. Read the config
+
+Read `.agentbreak/application.yaml` to understand what is enabled (LLM mode, MCP, port, upstream URLs). You need this to give the user correct instructions in step 6.
+
+### 4. If MCP is enabled, run inspect
 
 ```bash
-cp config.example.yaml application.yaml
-cp scenarios.example.yaml scenarios.yaml
+agentbreak inspect
 ```
 
-### Step 3: Configure application.yaml
+This discovers upstream MCP tools and writes the registry. If it fails, check that the MCP server is running and `mcp.upstream_url` is correct.
 
-Ask the user what they want to test. Based on their answer, edit `application.yaml`:
-
-**LLM-only testing (no API key needed):**
-
-```yaml
-llm:
-  enabled: true
-  mode: mock              # returns synthetic completions, no API key needed
-  upstream_url: https://api.openai.com
-mcp:
-  enabled: false
-serve:
-  host: 0.0.0.0
-  port: 5005
-```
-
-**LLM proxy testing (real API):**
-
-```yaml
-llm:
-  enabled: true
-  mode: proxy             # forwards to real LLM
-  upstream_url: https://api.openai.com
-  auth:
-    type: bearer
-    env: OPENAI_API_KEY   # reads token from this env var
-mcp:
-  enabled: false
-serve:
-  host: 0.0.0.0
-  port: 5005
-```
-
-**LLM + MCP testing:**
-
-```yaml
-llm:
-  enabled: true
-  mode: mock
-  upstream_url: https://api.openai.com
-mcp:
-  enabled: true
-  upstream_url: http://127.0.0.1:8001/mcp    # the real MCP server
-  transport: streamable_http
-  auth:
-    type: bearer
-    env: MCP_API_KEY
-serve:
-  host: 0.0.0.0
-  port: 5005
-```
-
-**MCP auth variants:**
-
-Bearer (shown above) is the simplest. Two other auth types are supported:
-
-```yaml
-# Basic auth
-mcp:
-  auth:
-    type: basic
-    username: agent
-    password_env: MCP_PASSWORD
-
-# OAuth2 client credentials
-mcp:
-  auth:
-    type: oauth2_client_credentials
-    token_url: https://auth.example.com/oauth/token
-    client_id: my-agent
-    client_secret_env: MCP_CLIENT_SECRET
-    scopes: ["mcp:read", "mcp:write"]
-```
-
-IMPORTANT: On macOS, port 5000 is often taken by AirPlay Receiver. Use port 5005 or another free port.
-
-### Step 4: Configure scenarios.yaml
-
-If the user doesn't have specific scenarios in mind, start with something visible for a demo:
-
-```yaml
-version: 1
-scenarios:
-  - name: llm-latency
-    summary: Random 2-3 second delays on LLM calls
-    target: llm_chat
-    fault:
-      kind: latency
-      min_ms: 2000
-      max_ms: 3000
-    schedule:
-      mode: random
-      probability: 0.5
-
-  - name: llm-500-errors
-    summary: Random server errors on LLM calls
-    target: llm_chat
-    fault:
-      kind: http_error
-      status_code: 500
-    schedule:
-      mode: random
-      probability: 0.3
-```
-
-Or use a preset for one-liner setup:
-
-```yaml
-version: 1
-preset: brownout
-```
-
-Available presets: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
-
-For the full scenario schema, use the `agentbreak-create-tests` skill.
-
-### Step 5: If MCP is enabled, run inspect
-
-This discovers the upstream MCP server's tools, resources, and prompts and writes `.agentbreak/registry.json`:
+### 5. Validate
 
 ```bash
-agentbreak inspect --config application.yaml
+agentbreak validate
 ```
 
-Expected output:
-```
-Discovered N MCP tools
-Wrote registry: .agentbreak/registry.json
-```
+Fix any errors before proceeding.
 
-If this fails:
-- Check that `mcp.upstream_url` is correct and the MCP server is running
-- Check auth configuration if the server requires authentication
-- Ensure the server speaks MCP over streamable HTTP
-
-### Step 6: Validate configuration
-
-Always validate before serving:
+### 6. Start the proxy
 
 ```bash
-agentbreak validate --config application.yaml --scenarios scenarios.yaml
+agentbreak serve -v &
 ```
 
-Expected output:
-```
-Config valid: llm_enabled=True mcp_enabled=True scenarios=3 tools=3
-```
+Run it in the background. Wait for the startup log line confirming the port.
 
-If validation fails, it will tell you exactly what's wrong (missing fields, invalid fault kinds, unsupported targets, etc.). Fix the issue and re-validate.
+### 7. Tell the user how to connect
 
-### Step 7: Start the chaos proxy
+Based on what you read from `.agentbreak/application.yaml`, tell the user the exact env vars or code changes needed:
 
+**For LLM proxy** (read the port from config, default 5005):
 ```bash
-agentbreak serve --config application.yaml --scenarios scenarios.yaml -v
-```
-
-The `-v` flag enables verbose logging so you can see each request and fault injection in real time. The server logs will show:
-```
-INFO [agentbreak] starting on 0.0.0.0:5005
-INFO [agentbreak] llm=proxy mcp=on scenarios=3
-```
-
-Leave this running in its own terminal.
-
-### Step 8: Send traffic through the proxy
-
-The user's agent should point at AgentBreak instead of the real API:
-
-```python
-# Python (OpenAI SDK)
-client = OpenAI(base_url="http://localhost:5005/v1")
-```
-
-```bash
-# Environment variables
-export OPENAI_BASE_URL=http://127.0.0.1:5005/v1
+export OPENAI_BASE_URL=http://127.0.0.1:{port}/v1
 export OPENAI_API_KEY=dummy   # any value works in mock mode
 ```
 
-For MCP, point the agent's MCP client at `http://localhost:5005/mcp`.
-
-To quickly test without an agent, use curl:
-
-```bash
-# Single LLM request
-curl -s http://localhost:5005/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}]}'
-
-# Multiple requests (use unique content to avoid loop detection)
-for i in {1..10}; do
-  curl -s -w " [HTTP %{http_code}]\n" http://localhost:5005/v1/chat/completions \
-    -H "Content-Type: application/json" \
-    -d "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Request $i: hello\"}]}"
-done
+**For MCP proxy**:
+```
+Point your MCP client at http://127.0.0.1:{port}/mcp
 ```
 
-### Step 9: Check the scorecard
+Tell the user to run their agent now and exercise the workflows they want to test.
+
+### 8. Wait for user to run their agent
+
+Ask the user to confirm when they are done running their agent.
+
+### 9. Read and interpret the scorecard
 
 ```bash
-# LLM scorecard
-curl -s http://localhost:5005/_agentbreak/scorecard | python3 -m json.tool
-
-# MCP scorecard (if MCP enabled)
-curl -s http://localhost:5005/_agentbreak/mcp-scorecard | python3 -m json.tool
-
-# Recent requests log
-curl -s http://localhost:5005/_agentbreak/requests | python3 -m json.tool
-curl -s http://localhost:5005/_agentbreak/mcp-requests | python3 -m json.tool
+curl -s http://localhost:{port}/_agentbreak/scorecard | python3 -m json.tool
 ```
 
-### Step 10: Interpret results
+If MCP is enabled:
+```bash
+curl -s http://localhost:{port}/_agentbreak/mcp-scorecard | python3 -m json.tool
+```
 
-**Scorecard fields:**
+Interpret the results for the user (see scorecard interpretation below).
+
+### 10. Stop the proxy
+
+```bash
+kill %1   # or kill the background agentbreak process
+```
+
+The final scorecard is also printed to stderr on shutdown.
+
+## Scorecard interpretation
+
+**Fields:**
 
 | Field | Meaning |
 |-------|---------|
 | `requests_seen` | Total requests proxied |
-| `injected_faults` | How many faults AgentBreak injected |
-| `latency_injections` | How many latency delays were added |
-| `upstream_successes` | Requests that succeeded (with or without faults) |
-| `upstream_failures` | Requests that failed (injected errors or real upstream errors) |
-| `duplicate_requests` | Same request body seen more than once |
+| `injected_faults` | Faults AgentBreak injected |
+| `latency_injections` | Latency delays added |
+| `upstream_successes` | Requests that succeeded |
+| `upstream_failures` | Requests that failed (injected or real) |
+| `duplicate_requests` | Same request body seen 2+ times |
 | `suspected_loops` | Same request body seen 3+ times (agent may be stuck) |
 | `run_outcome` | PASS, DEGRADED, or FAIL |
 | `resilience_score` | 0-100 score |
 
-**MCP scorecard** also includes: `tool_calls`, `method_counts`, `tool_call_counts`, `tool_successes_by_name`, `tool_failures_by_name`, `response_mutations`.
+MCP scorecard adds: `tool_calls`, `method_counts`, `tool_call_counts`, `tool_successes_by_name`, `tool_failures_by_name`, `response_mutations`.
 
-**Resilience score interpretation:**
+**Score ranges:**
 
 | Score | Meaning |
 |-------|---------|
 | 80-100 | Resilient -- agent handles faults well |
-| 50-79 | Degraded -- some failures but partially functional |
+| 50-79 | Degraded -- partial failures, needs improvement |
 | 0-49 | Fragile -- agent struggles with faults |
 
-Duplicate and loop counters are signals, not necessarily bugs. Some frameworks legitimately retry or repeat completions.
+Duplicate and loop counters are signals, not necessarily bugs. Some frameworks legitimately retry.
 
-### Step 11: Stop and review
-
-Ctrl+C the `agentbreak serve` process. It prints the final scorecard to stderr.
-
-## All available endpoints
+## Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /healthz` | Health check |
 | `GET /_agentbreak/scorecard` | LLM scorecard |
 | `GET /_agentbreak/requests` | LLM recent requests |
-| `GET /_agentbreak/llm-scorecard` | LLM scorecard (explicit) |
-| `GET /_agentbreak/llm-requests` | LLM recent requests (explicit) |
 | `GET /_agentbreak/mcp-scorecard` | MCP scorecard |
 | `GET /_agentbreak/mcp-requests` | MCP recent requests |
-| `GET /_agentbreak/history` | All recorded runs (requires `history.enabled: true`) |
-| `GET /_agentbreak/history/{run_id}` | Details for a single run |
-
-## All CLI commands
-
-| Command | Purpose |
-|---------|---------|
-| `agentbreak serve` | Start the chaos proxy. Flags: `--config`, `--scenarios`, `--registry`, `-v` |
-| `agentbreak validate` | Check configs without starting. Flags: `--config`, `--scenarios`, `--registry` |
-| `agentbreak inspect` | Discover MCP tools, write registry. Flags: `--config`, `--registry` |
-| `agentbreak verify` | Run test suite (no flags) |
+| `GET /_agentbreak/history` | All recorded runs (if `history.enabled: true`) |
+| `GET /_agentbreak/history/{run_id}` | Single run details |
 
 ## Common issues
 
-- **Port 5000 in use on macOS**: AirPlay Receiver uses it. Use port 5005 or disable AirPlay in System Settings.
-- **`agentbreak: command not found`**: Activate the venv first (`source .venv/bin/activate`) or install globally (`pip install agentbreak`).
-- **No faults firing**: Check scenario probability. At `probability: 0.1` you need ~10+ requests to see one. Increase to 0.5 for demos.
-- **MCP inspect fails**: Ensure the upstream MCP server is running and `mcp.upstream_url` is correct.
-- **`FileNotFoundError`**: `application.yaml` must exist. Copy from `config.example.yaml`.
-- **Registry not found**: Run `agentbreak inspect` before `serve` when `mcp.enabled: true`.
-
-## CI usage
-
-```bash
-pip install agentbreak
-agentbreak serve --config application.yaml --scenarios scenarios.yaml &
-sleep 2
-pytest your_agent_tests/
-SCORE=$(curl -s localhost:5005/_agentbreak/scorecard | python3 -c "import sys,json; print(json.load(sys.stdin)['resilience_score'])")
-echo "Resilience score: $SCORE"
-[ "$SCORE" -ge 70 ] || exit 1
-```
+- **Port 5000 in use on macOS**: AirPlay Receiver uses it. Use port 5005 or change in application.yaml.
+- **`agentbreak: command not found`**: `pip install agentbreak` or activate the correct venv.
+- **No faults firing**: Check scenario probability. At `0.1` you need ~10+ requests. Increase to `0.5` for demos.
+- **MCP inspect fails**: Ensure upstream MCP server is running and `mcp.upstream_url` is correct.
+- **Registry not found**: Run `agentbreak inspect` before `serve` when MCP is enabled.

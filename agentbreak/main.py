@@ -29,8 +29,53 @@ from agentbreak.history import RunHistory
 from agentbreak.scenarios import Scenario, ScenarioFile, load_scenarios, validate_supported_targets
 
 
-cli = typer.Typer(add_completion=False, help="Chaos testing for OpenAI-compatible LLM and MCP tool runtimes.")
+cli = typer.Typer(add_completion=False, help="Chaos testing for OpenAI and Anthropic LLM APIs, and MCP tool runtimes.")
 app = FastAPI(title="agentbreak")
+
+DEFAULT_APPLICATION_YAML = """\
+llm:
+  enabled: true
+  mode: mock
+  # upstream_url: https://api.openai.com
+  # auth:
+  #   type: bearer
+  #   env: OPENAI_API_KEY
+
+mcp:
+  enabled: false
+  # upstream_url: http://127.0.0.1:8001/mcp
+  # auth:
+  #   type: bearer
+  #   env: MCP_TOKEN
+
+serve:
+  port: 5005
+"""
+
+DEFAULT_SCENARIOS_YAML = """\
+version: 1
+scenarios:
+  - name: llm-latency
+    summary: Random latency on LLM calls
+    target: llm_chat
+    fault:
+      kind: latency
+      min_ms: 2000
+      max_ms: 5000
+    schedule:
+      mode: random
+      probability: 0.3
+
+  - name: llm-error
+    summary: Random server errors on LLM calls
+    target: llm_chat
+    fault:
+      kind: http_error
+      status_code: 500
+    schedule:
+      mode: random
+      probability: 0.2
+"""
 
 
 @dataclass
@@ -88,12 +133,13 @@ class LLMRuntime:
     stats: LLMStats = field(default_factory=LLMStats)
     scenario_counters: dict[str, int] = field(default_factory=dict)
 
-    async def handle_chat(self, request: Request) -> Response:
+    async def handle_chat(self, request: Request, *, api_format: str = "openai") -> Response:
         body = await request.body()
         self._record_request(body)
         payload, has_parse_error = parse_json_body(body)
+        error_fn = anthropic_error if api_format == "anthropic" else openai_error
         if has_parse_error:
-            return JSONResponse(status_code=400, content=openai_error(400, message_override="Malformed JSON request body."))
+            return JSONResponse(status_code=400, content=error_fn(400, message_override="Malformed JSON request body."))
         scenario = choose_matching_scenario(
             self.scenarios,
             "llm_chat",
@@ -110,15 +156,17 @@ class LLMRuntime:
                 self.stats.injected_faults += 1
                 self.stats.upstream_failures += 1
                 logger.info("injecting http_error %d via %s", scenario.fault.status_code or 500, scenario.name)
-                return JSONResponse(status_code=scenario.fault.status_code or 500, content=openai_error(scenario.fault.status_code or 500))
+                return JSONResponse(status_code=scenario.fault.status_code or 500, content=error_fn(scenario.fault.status_code or 500))
 
+        upstream_path = "/v1/messages" if api_format == "anthropic" else "/v1/chat/completions"
         if self.mode == "mock":
-            response_body = json.dumps(mock_completion()).encode("utf-8")
+            mock_fn = mock_anthropic_completion if api_format == "anthropic" else mock_completion
+            response_body = json.dumps(mock_fn()).encode("utf-8")
         else:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 try:
                     upstream = await client.post(
-                        f"{self.upstream_url.rstrip('/')}/v1/chat/completions",
+                        f"{self.upstream_url.rstrip('/')}{upstream_path}",
                         content=body,
                         headers=filter_request_headers(request.headers, self.auth_headers),
                     )
@@ -127,7 +175,7 @@ class LLMRuntime:
                     logger.warning("upstream unreachable: %s", exc)
                     return JSONResponse(
                         status_code=502,
-                        content={"error": {"message": f"AgentBreak could not reach upstream: {exc}", "type": "upstream_connection_error", "code": 502}},
+                        content=error_fn(502, message_override=f"AgentBreak could not reach upstream: {exc}"),
                     )
             if upstream.status_code >= 400:
                 self.stats.upstream_failures += 1
@@ -140,7 +188,8 @@ class LLMRuntime:
             response_body = upstream.content
 
         if scenario is not None and scenario.fault.kind in {"empty_response", "invalid_json", "large_response", "wrong_content", "schema_violation"}:
-            response_body = mutate_llm_body(response_body, scenario)
+            mutate_fn = mutate_anthropic_body if api_format == "anthropic" else mutate_llm_body
+            response_body = mutate_fn(response_body, scenario)
             self.stats.response_mutations += 1
             self.stats.upstream_successes += 1
             return Response(content=response_body, status_code=200, media_type="application/json")
@@ -583,6 +632,19 @@ async def apply_latency_fault(scenario: Scenario) -> None:
     await asyncio.sleep(random.randint(scenario.fault.min_ms, scenario.fault.max_ms) / 1000)
 
 
+def mock_anthropic_completion() -> dict[str, Any]:
+    return {
+        "id": "msg-agentbreak-mock",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": "AgentBreak mock response."}],
+        "model": "agentbreak-mock",
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+
+
 def mock_completion() -> dict[str, Any]:
     return {
         "id": "chatcmpl-agentbreak-mock",
@@ -615,6 +677,24 @@ def mutate_llm_body(body: bytes, scenario: Scenario) -> bytes:
         return json.dumps(payload).encode("utf-8")
     if kind == "schema_violation":
         return apply_response_behavior(body, "malformed_tool_calls")
+    return body
+
+
+def mutate_anthropic_body(body: bytes, scenario: Scenario) -> bytes:
+    kind = scenario.fault.kind
+    if kind == "empty_response":
+        return b""
+    if kind == "invalid_json":
+        return b"{not valid"
+    payload = json.loads(body.decode("utf-8"))
+    if kind == "large_response":
+        payload["content"] = [{"type": "text", "text": large_text(scenario.fault.size_bytes or 0)}]
+        return json.dumps(payload).encode("utf-8")
+    if kind == "wrong_content":
+        payload["content"] = [{"type": "text", "text": scenario.fault.body or "AgentBreak injected wrong content."}]
+        return json.dumps(payload).encode("utf-8")
+    if kind == "schema_violation":
+        return apply_response_behavior(body, "malformed_tool_use")
     return body
 
 
@@ -745,6 +825,23 @@ def openai_error(status_code: int, message_override: str | None = None) -> dict[
     return {"error": {"message": message, "type": error_type, "code": status_code}}
 
 
+def anthropic_error(status_code: int, message_override: str | None = None) -> dict[str, Any]:
+    error_map = {
+        400: ("Invalid request injected by AgentBreak.", "invalid_request_error"),
+        401: ("Authentication failure injected by AgentBreak.", "authentication_error"),
+        403: ("Permission failure injected by AgentBreak.", "permission_error"),
+        404: ("Resource not found injected by AgentBreak.", "not_found_error"),
+        429: ("Rate limit exceeded by AgentBreak fault injection.", "rate_limit_error"),
+        500: ("Upstream failure injected by AgentBreak.", "api_error"),
+        502: ("AgentBreak could not reach upstream.", "api_error"),
+        503: ("Service unavailable injected by AgentBreak.", "overloaded_error"),
+    }
+    message, error_type = error_map.get(status_code, ("Upstream failure injected by AgentBreak.", "api_error"))
+    if message_override is not None:
+        message = message_override
+    return {"type": "error", "error": {"type": error_type, "message": message}}
+
+
 def require_service_state() -> ServiceState:
     if service_state is None:
         raise RuntimeError("AgentBreak is not configured. Run `agentbreak serve` or set main.service_state in tests.")
@@ -829,6 +926,14 @@ async def proxy_chat_completions(request: Request):
     return await state.llm_runtime.handle_chat(request)
 
 
+@app.post("/v1/messages")
+async def proxy_anthropic_messages(request: Request):
+    state = require_service_state()
+    if state.llm_runtime is None:
+        return JSONResponse(status_code=404, content={"type": "error", "error": {"type": "not_found_error", "message": "LLM runtime is disabled"}})
+    return await state.llm_runtime.handle_chat(request, api_format="anthropic")
+
+
 @app.post("/mcp")
 async def handle_mcp(request: Request):
     state = require_service_state()
@@ -909,9 +1014,29 @@ async def get_agentbreak_history_run(run_id: int) -> JSONResponse:
     return JSONResponse(content=result)
 
 
+@cli.command(help="Initialize .agentbreak/ with default configuration files.")
+def init() -> None:
+    agentbreak_dir = Path(".agentbreak")
+    agentbreak_dir.mkdir(exist_ok=True)
+
+    app_path = agentbreak_dir / "application.yaml"
+    if app_path.exists():
+        typer.echo(f"Already exists: {app_path}")
+    else:
+        app_path.write_text(DEFAULT_APPLICATION_YAML, encoding="utf-8")
+        typer.echo(f"Created {app_path}")
+
+    scenarios_path = agentbreak_dir / "scenarios.yaml"
+    if scenarios_path.exists():
+        typer.echo(f"Already exists: {scenarios_path}")
+    else:
+        scenarios_path.write_text(DEFAULT_SCENARIOS_YAML, encoding="utf-8")
+        typer.echo(f"Created {scenarios_path}")
+
+
 @cli.command(help="Inspect an upstream MCP server, validate auth, and write a tool registry artifact.")
 def inspect(
-    config_path: str | None = typer.Option(None, "--config", help="Application config path. Defaults to ./application.yaml."),
+    config_path: str | None = typer.Option(None, "--config", help="Config path. Defaults to .agentbreak/application.yaml."),
     registry_path: str | None = typer.Option(None, "--registry", help="Registry output path. Defaults to ./.agentbreak/registry.json."),
 ) -> None:
     application = load_application_config(config_path)
@@ -926,8 +1051,8 @@ def inspect(
 
 @cli.command(help="Serve AgentBreak using application.yaml, scenarios.yaml, and an MCP registry artifact.")
 def serve(
-    config_path: str | None = typer.Option(None, "--config", help="Application config path. Defaults to ./application.yaml."),
-    scenarios_path: str | None = typer.Option(None, "--scenarios", help="Scenario config path. Defaults to ./scenarios.yaml."),
+    config_path: str | None = typer.Option(None, "--config", help="Config path. Defaults to .agentbreak/application.yaml."),
+    scenarios_path: str | None = typer.Option(None, "--scenarios", help="Scenarios path. Defaults to .agentbreak/scenarios.yaml."),
     registry_path: str | None = typer.Option(None, "--registry", help="Registry path. Defaults to ./.agentbreak/registry.json."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging."),
 ) -> None:
@@ -963,8 +1088,8 @@ def serve(
 
 @cli.command(help="Validate application, scenario, and registry files without starting the server.")
 def validate(
-    config_path: str | None = typer.Option(None, "--config", help="Application config path."),
-    scenarios_path: str | None = typer.Option(None, "--scenarios", help="Scenario config path."),
+    config_path: str | None = typer.Option(None, "--config", help="Config path. Defaults to .agentbreak/application.yaml."),
+    scenarios_path: str | None = typer.Option(None, "--scenarios", help="Scenarios path. Defaults to .agentbreak/scenarios.yaml."),
     registry_path: str | None = typer.Option(None, "--registry", help="Registry path."),
 ) -> None:
     state = load_service_state(config_path, scenarios_path, registry_path)

@@ -11,10 +11,11 @@ pip install -e '.[dev]'   # includes pytest; use '.' for core only
 ## Commands
 
 ```bash
-agentbreak verify                                                    # run pytest
-agentbreak validate --config application.yaml --scenarios scenarios.yaml  # check config
-agentbreak inspect --config application.yaml                         # discover MCP tools
-agentbreak serve --config application.yaml --scenarios scenarios.yaml     # start proxy
+agentbreak init                    # create .agentbreak/ config
+agentbreak verify                  # run pytest
+agentbreak validate                # check config
+agentbreak inspect                 # discover MCP tools
+agentbreak serve                   # start proxy
 ```
 
 ## Repo Layout

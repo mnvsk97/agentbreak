@@ -34,10 +34,29 @@ def malformed_tool_calls(body: bytes) -> bytes:
     return json.dumps(payload).encode("utf-8")
 
 
+def malformed_tool_use(body: bytes) -> bytes:
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return b"{not valid"
+
+    if not isinstance(payload, dict):
+        return b"{not valid"
+
+    content = payload.get("content")
+    if isinstance(content, list) and content:
+        payload["content"] = [{"type": "tool_use", "id": "INVALID", "name": "INVALID", "input": "INVALID"}]
+        return json.dumps(payload).encode("utf-8")
+
+    payload["content"] = "INVALID"
+    return json.dumps(payload).encode("utf-8")
+
+
 RESPONSE_BEHAVIORS: dict[str, Callable[[bytes], bytes]] = {
     "empty": empty,
     "invalid_json": invalid_json,
     "malformed_tool_calls": malformed_tool_calls,
+    "malformed_tool_use": malformed_tool_use,
 }
 
 

@@ -11,13 +11,10 @@ Agent  →  AgentBreak (localhost:5005)  →  Real LLM / MCP server
 ## Quick start
 
 ```bash
-git clone https://github.com/mnvsk97/agentbreak.git && cd agentbreak
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'            # or just pip install -e . for core only
-
-cp config.example.yaml application.yaml    # edit: llm.mode, mcp.enabled
-cp scenarios.example.yaml scenarios.yaml   # edit: faults to inject
-agentbreak serve --config application.yaml --scenarios scenarios.yaml
+pip install agentbreak
+agentbreak init                    # creates .agentbreak/ with default configs
+# edit .agentbreak/application.yaml and .agentbreak/scenarios.yaml
+agentbreak serve
 ```
 
 Point your agent at `http://localhost:5005/v1` instead of the real API. Check results:
@@ -28,7 +25,7 @@ curl localhost:5005/_agentbreak/scorecard
 
 ## Config
 
-**application.yaml** -- what to proxy (see `config.example.yaml`):
+**`.agentbreak/application.yaml`** -- what to proxy:
 
 ```yaml
 llm:
@@ -40,7 +37,7 @@ serve:
   port: 5005
 ```
 
-**scenarios.yaml** -- what faults to inject:
+**`.agentbreak/scenarios.yaml`** -- what faults to inject:
 
 ```yaml
 version: 1
@@ -66,14 +63,15 @@ Or use a preset: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-t
 ## MCP testing
 
 ```bash
-agentbreak inspect --config application.yaml   # discover tools
-agentbreak serve --config application.yaml --scenarios scenarios.yaml
+agentbreak inspect    # discover tools
+agentbreak serve
 # Agent connects to http://localhost:5005/mcp
 ```
 
 ## CLI
 
 ```bash
+agentbreak init       # create .agentbreak/ config
 agentbreak serve      # start proxy
 agentbreak validate   # check config
 agentbreak inspect    # discover MCP tools

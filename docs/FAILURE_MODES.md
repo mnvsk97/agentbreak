@@ -4,7 +4,7 @@ AgentBreak simulates infrastructure-level failures around agent systems.
 
 ## Targets
 
-- `llm_chat` -- OpenAI-compatible chat completions
+- `llm_chat` -- OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) chat APIs
 - `mcp_tool` -- MCP tool calls, resource reads, prompt gets
 
 ## Fault Kinds
