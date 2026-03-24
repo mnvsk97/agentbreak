@@ -10,7 +10,10 @@ config.yaml
 .superdesign/
 .claude/
 .tmp/
+.agentbreak/
 application.yaml
+scenarios.yaml
+uv.lock
 *.pckl
 .langgraph_api/
 .agents/

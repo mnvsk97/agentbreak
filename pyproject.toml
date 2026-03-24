@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentbreak"
 version = "0.1.2"
-description = "Minimal chaos proxy for OpenAI-compatible LLM and MCP agent runtimes."
+description = "Chaos proxy for testing LLM agents. Supports OpenAI, Anthropic, and MCP."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = ["llm", "openai", "proxy", "chaos-testing", "resilience"]
+keywords = ["llm", "openai", "anthropic", "mcp", "proxy", "chaos-testing", "resilience", "agents"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

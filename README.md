@@ -3,21 +3,25 @@
 Chaos proxy for testing how your agents handle failures. Sits between your agent and the LLM/MCP server, injects faults.
 
 ```
-Agent  →  AgentBreak (localhost:5005)  →  Real LLM / MCP server
-               ↑
-          scenarios.yaml
+Agent  -->  AgentBreak (localhost:5005)  -->  Real LLM / MCP server
+                     ^
+          .agentbreak/scenarios.yaml defines faults
 ```
 
 ## Quick start
 
 ```bash
 pip install agentbreak
-agentbreak init                    # creates .agentbreak/ with default configs
-# edit .agentbreak/application.yaml and .agentbreak/scenarios.yaml
-agentbreak serve
+agentbreak init       # creates .agentbreak/ with default configs
+agentbreak serve      # start the chaos proxy
 ```
 
-Point your agent at `http://localhost:5005` instead of the real API. Works with both OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) formats. Check results:
+Point your agent at `http://localhost:5005` instead of the real API:
+
+- OpenAI SDK: set `OPENAI_BASE_URL=http://localhost:5005/v1`
+- Anthropic SDK: set `ANTHROPIC_BASE_URL=http://localhost:5005`
+
+Check results:
 
 ```bash
 curl localhost:5005/_agentbreak/scorecard
@@ -44,7 +48,7 @@ version: 1
 scenarios:
   - name: slow-llm
     summary: Latency spike on completions
-    target: llm_chat           # or mcp_tool
+    target: llm_chat
     fault:
       kind: latency
       min_ms: 2000
@@ -63,9 +67,8 @@ Or use a preset: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-t
 ## MCP testing
 
 ```bash
-agentbreak inspect    # discover tools
-agentbreak serve
-# Agent connects to http://localhost:5005/mcp
+agentbreak inspect    # discover tools from upstream MCP server
+agentbreak serve      # proxy both LLM and MCP traffic
 ```
 
 ## CLI
@@ -84,11 +87,8 @@ agentbreak verify     # run tests
 npx skills add mnvsk97/agentbreak
 ```
 
-## Docs
-
-- [Testing Methodology](docs/TESTING_METHODOLOGY.md) -- how to design chaos tests, read results, and iterate
-- [Failure Modes](docs/FAILURE_MODES.md) -- what AgentBreak simulates and what is out of scope
+Then use `/agentbreak` to chaos-test your agent with a guided workflow.
 
 ## Examples
 
-See [examples/](examples/) -- agents (ReAct, DeepAgents) and MCP servers (no auth, bearer, basic, OAuth2).
+See [examples/](examples/) for sample agents and MCP servers with various auth configs.

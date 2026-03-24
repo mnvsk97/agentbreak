@@ -4,7 +4,8 @@
 
 AgentBreak is a chaos proxy for:
 
-- OpenAI-compatible `POST /v1/chat/completions`
+- OpenAI `POST /v1/chat/completions`
+- Anthropic `POST /v1/messages`
 - MCP over streamable HTTP at `POST /mcp`
 
 Keep the surface small and explicit: typed YAML config, reproducible scenarios, deterministic `agentbreak verify`.

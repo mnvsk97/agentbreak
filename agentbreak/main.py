@@ -36,17 +36,12 @@ DEFAULT_APPLICATION_YAML = """\
 llm:
   enabled: true
   mode: mock
-  # OpenAI:
+  # Proxy mode — uncomment for your provider:
   # upstream_url: https://api.openai.com
+  # upstream_url: https://api.anthropic.com
   # auth:
   #   type: bearer
   #   env: OPENAI_API_KEY
-  # Anthropic:
-  # upstream_url: https://api.anthropic.com
-  # auth:
-  #   type: api_key
-  #   header_name: x-api-key
-  #   env: ANTHROPIC_API_KEY
 
 mcp:
   enabled: false
