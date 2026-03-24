@@ -24,13 +24,12 @@ Project command definition: **`.claude-plugin/commands/agentbreak.md`** (install
 
 ## Skills
 
-Bundled workflows under **`skills/`** (copy each folder into a client skills directory if needed):
+Bundled workflows under **`skills/`** (install via `npx skills add mnvsk97/agentbreak`):
 
 | Skill | Path |
 |-------|------|
-| AgentBreak chaos testing | `skills/agentbreak-testing/SKILL.md` |
-| Run / debug tests | `skills/tester/SKILL.md` |
-| Author new tests | `skills/test-generator/SKILL.md` |
+| Run chaos tests | `skills/agentbreak-run-tests/SKILL.md` |
+| Generate chaos scenarios | `skills/agentbreak-create-tests/SKILL.md` |
 
 ## Docs map
 

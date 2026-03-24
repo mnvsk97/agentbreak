@@ -20,8 +20,10 @@ from langgraph_sdk import get_sync_client
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
-LANGGRAPH = REPO_ROOT / ".venv" / "bin" / "langgraph"
+_VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+PYTHON = str(_VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
+_VENV_LANGGRAPH = REPO_ROOT / ".venv" / "bin" / "langgraph"
+LANGGRAPH = str(_VENV_LANGGRAPH) if _VENV_LANGGRAPH.exists() else shutil.which("langgraph") or "langgraph"
 UV = shutil.which("uv")
 PYTHON312 = shutil.which("python3.12") or "/opt/homebrew/bin/python3.12"
 RUNTIME_ROOT = REPO_ROOT / ".tmp" / "agentbreak-live-runtime"
@@ -148,8 +150,8 @@ def ensure_example_dependencies(logger: RunLogger) -> None:
 def langgraph_command() -> list[str]:
     if RUNTIME_LANGGRAPH.exists():
         return [str(RUNTIME_LANGGRAPH)]
-    if LANGGRAPH.exists():
-        return [str(LANGGRAPH)]
+    if Path(LANGGRAPH).exists():
+        return [LANGGRAPH]
     if RUNTIME_PYTHON.exists():
         return [str(RUNTIME_PYTHON), "-m", "langgraph_cli"]
     return [str(PYTHON), "-m", "langgraph_cli"]

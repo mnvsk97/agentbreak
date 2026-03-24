@@ -21,7 +21,7 @@ Keep the surface small and explicit: typed YAML config, reproducible scenarios, 
 | `tests/` | Pytest suite; `agentbreak verify` runs pytest |
 | `examples/` | LangChain, LangGraph, MCP servers, live harness |
 | `docs/` | Failure modes, deferred scenarios, live testing notes |
-| `skills/` | Claude Code skills (`agentbreak-testing`, `tester`, `test-generator`) |
+| `skills/` | Claude Code skills (`agentbreak-run-tests`, `agentbreak-create-tests`) |
 
 ## Config
 
@@ -49,7 +49,7 @@ agentbreak verify --live # pytest + LangGraph live harness
 - Update `scenarios.example.yaml` / `config.example.yaml` if shapes change.
 - Extend `tests/` and keep `agentbreak verify` green.
 - Update `README.md` for user-visible changes; `CONTRIBUTING.md` for dev workflows.
-- Keep `skills/agentbreak-testing/SKILL.md` and `.claude-plugin/commands/agentbreak.md` aligned with the CLI.
+- Keep `skills/agentbreak-run-tests/SKILL.md`, `skills/agentbreak-create-tests/SKILL.md`, and `.claude-plugin/commands/agentbreak.md` aligned with the CLI.
 
 ## Principles
 

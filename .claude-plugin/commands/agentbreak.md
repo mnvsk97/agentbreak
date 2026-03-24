@@ -120,4 +120,5 @@ agentbreak verify --live   # full stack
 
 - `README.md` -- scenario format, examples, scope
 - `CONTRIBUTING.md` -- dev install and commands
-- `skills/agentbreak-testing/SKILL.md` -- step-by-step testing workflow
+- `skills/agentbreak-run-tests/SKILL.md` -- run chaos tests
+- `skills/agentbreak-create-tests/SKILL.md` -- generate chaos scenarios
