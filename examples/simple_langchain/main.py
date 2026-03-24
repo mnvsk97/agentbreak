@@ -1,7 +1,4 @@
 import os
-from pathlib import Path
-
-import yaml
 
 from langchain.agents import create_agent
 from langchain_core.tools import tool
@@ -16,19 +13,7 @@ def get_weather(city: str) -> str:
 
 def load_request_count() -> int:
     raw = os.getenv("AGENTBREAK_REQUEST_COUNT")
-    if raw is not None:
-        return max(1, int(raw))
-
-    for directory in [Path.cwd(), *Path.cwd().parents]:
-        config_path = directory / "config.yaml"
-        if not config_path.exists():
-            continue
-        with config_path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle) or {}
-        if isinstance(data, dict) and "request_count" in data:
-            return max(1, int(data["request_count"]))
-
-    return 1
+    return max(1, int(raw)) if raw is not None else 1
 
 
 def main() -> None:

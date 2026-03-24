@@ -5,5 +5,10 @@ __pycache__/
 build/
 dist/
 config.yaml
+.env
+.env.*
 .superdesign/
 .claude/
+.tmp/
+application.yaml
+*.pckl

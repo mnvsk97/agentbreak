@@ -1,180 +1,258 @@
 # AgentBreak
 
-AgentBreak lets you test how your app behaves when an OpenAI-compatible provider is slow, flaky, or down.
+A local chaos proxy for testing how your agents handle failures.
 
-It sits between your app and the provider, then randomly:
+```
+Your Agent  -->  AgentBreak (localhost:5000)  -->  Real LLM / MCP server
+                      |
+                 injects faults from
+                 scenarios.yaml
+```
 
-- returns errors like `429` or `500`
-- adds latency
-- lets some requests pass through normally
+It sits between your agent and two surfaces:
 
-Use it to check whether your app retries, falls back, or breaks.
+- OpenAI-compatible `POST /v1/chat/completions`
+- MCP servers over streamable HTTP (`POST /mcp`)
 
-PyPI package: [`agentbreak`](https://pypi.org/project/agentbreak/)
+and injects configurable faults: HTTP errors, latency, invalid JSON, empty bodies, corrupt tool-call shapes, timeouts, oversized responses, and more.
 
-## Quick Start
+## Usage
 
-Requirements:
-
-- Python 3.10+
-
-Install from PyPI:
+### 1. Install
 
 ```bash
 pip install agentbreak
 ```
 
-Start AgentBreak in mock mode:
+### 2. Configure
 
 ```bash
-agentbreak start --mode mock --scenario mixed-transient --fail-rate 0.2
+cp config.example.yaml application.yaml
+cp scenarios.example.yaml scenarios.yaml
 ```
 
-Point your app to it:
+**application.yaml** -- where to proxy traffic:
+
+```yaml
+llm:
+  enabled: true
+  mode: proxy              # "proxy" forwards to real LLM, "mock" fakes responses
+  upstream_url: https://api.openai.com
+  auth:
+    type: bearer
+    env: OPENAI_API_KEY    # reads token from this env var
+
+mcp:
+  enabled: false           # set true if testing MCP tools too
+
+serve:
+  host: 0.0.0.0
+  port: 5000
+```
+
+**scenarios.yaml** -- what faults to inject:
+
+```yaml
+version: 1
+scenarios:
+  - name: slow-llm
+    target: llm_chat
+    fault:
+      kind: latency
+      min_ms: 5000
+      max_ms: 15000
+    schedule:
+      mode: random
+      probability: 0.2    # 20% of requests get 5-15s delay
+```
+
+Or use a one-liner preset:
+
+```yaml
+version: 1
+preset: brownout
+```
+
+### 3. Start the proxy
 
 ```bash
-export OPENAI_BASE_URL=http://localhost:5000/v1
-export OPENAI_API_KEY=dummy
+agentbreak serve --config application.yaml --scenarios scenarios.yaml
 ```
 
-That is enough to start testing retry and fallback behavior locally.
+### 4. Point your agent at AgentBreak
 
-## How It Works
+Change your agent's base URL from the real API to AgentBreak:
 
-Normal path:
+```python
+# Before
+client = OpenAI()
 
-```text
-your app -> AgentBreak -> provider
+# After
+client = OpenAI(base_url="http://localhost:5000/v1")
 ```
 
-Mock path:
+Your agent thinks it's talking to OpenAI. AgentBreak forwards requests upstream and injects faults along the way.
 
-```text
-your app -> AgentBreak -> fake response / injected failure
-```
+### 5. Check the scorecard
 
-## Real Provider Mode
-
-If you want real upstream calls plus randomly injected failures:
-
-```bash
-agentbreak start \
-  --mode proxy \
-  --upstream-url https://api.openai.com \
-  --scenario mixed-transient \
-  --fail-rate 0.2
-```
-
-Then keep your app pointed at:
-
-```bash
-export OPENAI_BASE_URL=http://localhost:5000/v1
-```
-
-## Why This Matters
-
-Even major hosted providers have non-zero downtime.
-
-- [OpenAI Status](https://status.openai.com/)
-- [Claude Status](https://status.claude.com/)
-
-As of March 15, 2026, the official status pages report roughly:
-
-- OpenAI APIs: `99.76%` uptime over the last 90 days
-- Anthropic API: `99.4%` uptime over the last 90 days
-
-Inference:
-
-- `99.76%` uptime annualizes to about `21` hours of downtime per year
-- `99.4%` uptime annualizes to about `53` hours of downtime per year
-
-Self-hosted systems often have more moving parts to break: your own gateway, networking, autoscaling, auth, rate limiting, queues, and model serving stack. In practice, that can fail more often than a top-tier managed API.
-
-That is why resilience testing matters. You want to know whether your agent retries correctly, falls back correctly, avoids loops, and degrades gracefully before a real outage or brownout happens.
-
-## What It Supports
-
-- `POST /v1/chat/completions`
-- failure injection: `400`, `401`, `403`, `404`, `413`, `429`, `500`, `503`
-- latency injection
-- duplicate request tracking
-- a simple scorecard
-- mock mode and proxy mode
-
-## Useful Endpoints
+While your agent runs:
 
 ```bash
 curl http://localhost:5000/_agentbreak/scorecard
-curl http://localhost:5000/_agentbreak/requests
 ```
 
-Stop the server with `Ctrl+C` to print the final scorecard in the terminal.
+```json
+{
+  "requests_seen": 12,
+  "injected_faults": 3,
+  "upstream_successes": 9,
+  "duplicate_requests": 0,
+  "suspected_loops": 0,
+  "run_outcome": "PASS",
+  "resilience_score": 91
+}
+```
 
-## Config File
+When you Ctrl+C the server, the full scorecard prints to stderr.
 
-AgentBreak will load `config.yaml` from the current directory if it exists.
+### 6. MCP testing (optional)
 
-Fastest setup:
+If your agent uses MCP tools, enable MCP and discover the upstream server:
 
 ```bash
-cp config.example.yaml config.yaml
-agentbreak start
+# Edit application.yaml: set mcp.enabled: true, mcp.upstream_url
+agentbreak inspect --config application.yaml   # discovers tools, writes registry
+agentbreak serve --config application.yaml --scenarios scenarios.yaml
 ```
 
-CLI flags override config values.
+Point your agent's MCP client at `http://localhost:5000/mcp`. AgentBreak mirrors the real server's tools/resources/prompts and injects faults per your scenarios.
+
+### In CI
+
+```bash
+pip install agentbreak
+agentbreak serve --config application.yaml --scenarios scenarios.yaml &
+pytest your_agent_tests/
+curl -s localhost:5000/_agentbreak/scorecard | jq .resilience_score
+```
+
+### Mock mode (no API key needed)
+
+Set `llm.mode: mock` in application.yaml. AgentBreak returns fake OpenAI responses but still applies all faults. Good for CI or testing fault handling without burning tokens.
+
+## Scenario Reference
+
+Each scenario is one fault applied to one target:
+
+```yaml
+version: 1
+scenarios:
+  - name: docs-tool-invalid-schema
+    summary: Corrupt one MCP tool result
+    target: mcp_tool            # llm_chat or mcp_tool
+    match:
+      tool_name: search_docs    # optional filter
+    fault:
+      kind: schema_violation
+    schedule:
+      mode: random
+      probability: 0.3
+    tags: [mcp, schema]         # optional labels
+```
+
+**Targets:** `llm_chat`, `mcp_tool`
+
+**Match fields** (all optional, all must match if set):
+
+| Field | Example | Notes |
+|-------|---------|-------|
+| `tool_name` | `search_docs` | Exact match |
+| `tool_name_pattern` | `search_*` | Glob pattern |
+| `route` | `/v1/chat/completions` | Request path |
+| `method` | `tools/call` | MCP method or HTTP method |
+| `model` | `gpt-4o` | LLM model name |
+
+**Fault kinds:**
+
+| Kind | Extra fields | Notes |
+|------|-------------|-------|
+| `http_error` | `status_code` (required) | |
+| `latency` | `min_ms`, `max_ms` (required) | |
+| `timeout` | `min_ms`, `max_ms` (required) | MCP only |
+| `empty_response` | | |
+| `invalid_json` | | |
+| `schema_violation` | | Corrupts tool_calls (LLM) or result shape (MCP) |
+| `wrong_content` | `body` (optional) | |
+| `large_response` | `size_bytes` (required, > 0) | |
+
+**Schedule modes:**
+
+| Mode | Fields | Behavior |
+|------|--------|----------|
+| `always` | | Every matching request |
+| `random` | `probability` (0.0-1.0) | Fire with given probability |
+| `periodic` | `every`, `length` | Fire for `length` out of every `every` requests |
+
+**Presets** (expand into multiple scenarios):
+
+| Preset | What it does |
+|--------|-------------|
+| `brownout` | Random latency + HTTP errors on LLM |
+| `mcp-slow-tools` | Latency on MCP tool calls |
+| `mcp-tool-failures` | HTTP errors on MCP tool calls |
+| `mcp-mixed-transient` | Mix of latency, errors, and timeouts on MCP |
+
+## Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /healthz` | Health check |
+| `GET /_agentbreak/scorecard` | LLM scorecard |
+| `GET /_agentbreak/requests` | LLM recent requests |
+| `GET /_agentbreak/llm-scorecard` | LLM scorecard (explicit) |
+| `GET /_agentbreak/llm-requests` | LLM recent requests (explicit) |
+| `GET /_agentbreak/mcp-scorecard` | MCP scorecard (method counts, per-tool stats) |
+| `GET /_agentbreak/mcp-requests` | MCP recent requests |
+
+## Built-in Detection
+
+These are always on, no configuration needed:
+
+- **Duplicate detection** -- flags when the same request body is seen twice
+- **Loop detection** -- flags 3+ identical requests (agent is probably stuck)
+- **Session recovery** -- re-initializes upstream MCP session on expiry
+- **Resilience scoring** -- 0-100 score based on faults, failures, and loops
+
+## CLI Commands
+
+```bash
+agentbreak serve     # start the proxy
+agentbreak validate  # check config without starting
+agentbreak inspect   # discover MCP tools and write registry
+agentbreak verify    # run test suite (--live for full E2E harness)
+```
+
+All commands accept `--config`, `--scenarios`, and `--registry` flags. `serve` also accepts `--verbose / -v`.
 
 ## Examples
 
-Run the sample LangChain app:
-
-```bash
-cd examples/simple_langchain
-pip install -r requirements.txt
-OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://localhost:5000/v1 python main.py
-```
-
-More examples: [examples/README.md](examples/README.md)
+- [Simple LangChain client](examples/simple_langchain)
+- [Simple MCP server](examples/simple_mcp_server)
+- [LangGraph report agent](examples/langgraph_report_agent)
+- [Reporting MCP server](examples/reporting_mcp_server)
 
 ## Development
 
-Install locally in editable mode:
-
-```bash
-pip install -e .
-```
-
-Run tests:
-
 ```bash
 pip install -e '.[dev]'
-pytest -q
+agentbreak verify          # run pytest
+agentbreak verify --live   # pytest + live LangGraph E2E harness
 ```
 
-## Claude Code
-
-Install the slash command into your project:
-
-```bash
-mkdir -p .claude/commands
-curl -sSL https://raw.githubusercontent.com/mnvsk97/agentbreak/main/.claude-plugin/commands/agentbreak.md \
-  -o .claude/commands/agentbreak.md
-```
-
-Then in Claude Code:
-
-```
-/agentbreak run my app in mock mode and check the scorecard
-/agentbreak start proxy mode against https://api.openai.com with rate-limited scenario
-```
-
-The command teaches Claude how to start the server, choose scenarios, write config files, and interpret the scorecard.
-
-## Agent Skill
-
-This repo includes a portable Agent Skills skill at [skills/agentbreak-testing/SKILL.md](skills/agentbreak-testing/SKILL.md).
-
-## Links
+## More
 
 - [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
-- [License](LICENSE)
+- [Failure Modes](docs/FAILURE_MODES.md)
+- [Deferred Targets](docs/TODO_SCENARIOS.md)
+- [Live Testing](docs/live-testing.md)
+- [Docs Index](docs/README.md)

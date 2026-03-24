@@ -1,0 +1,28 @@
+version: 1
+# preset: mcp-mixed-transient
+
+scenarios:
+  - name: provider-brownout
+    summary: Slow and flaky chat completions
+    target: llm_chat
+    match: {}
+    fault:
+      kind: latency
+      min_ms: 5000
+      max_ms: 15000
+    schedule:
+      mode: random
+      probability: 0.2
+    tags: [llm, latency]
+
+  - name: docs-tool-invalid-schema
+    summary: Corrupt the MCP tool result contract
+    target: mcp_tool
+    match:
+      tool_name: search_docs
+    fault:
+      kind: schema_violation
+    schedule:
+      mode: random
+      probability: 0.3
+    tags: [mcp, schema]

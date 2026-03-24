@@ -1,45 +1,41 @@
 # Contributing
 
-Thanks for contributing to AgentBreak.
-
-## Development Setup
+## Setup
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]' -r examples/simple_langchain/requirements.txt
+pip install -e '.[dev]'
 ```
 
-## Common Commands
-
-Run tests:
+## Commands
 
 ```bash
-pytest -q
+agentbreak verify                                                    # run pytest
+agentbreak verify --live                                             # pytest + live LangGraph harness
+agentbreak validate --config application.yaml --scenarios scenarios.yaml  # check config
+agentbreak inspect --config application.yaml                         # discover MCP tools
+agentbreak serve --config application.yaml --scenarios scenarios.yaml     # start proxy
 ```
 
-Run AgentBreak locally:
+## Repo Layout
 
-```bash
-agentbreak start --mode mock --scenario mixed-transient --fail-rate 0
-```
-
-Run the simple example:
-
-```bash
-OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://127.0.0.1:5000/v1 python examples/simple_langchain/main.py
-```
+| Path | Role |
+|------|------|
+| `agentbreak/main.py` | CLI (`serve`, `validate`, `inspect`, `verify`), FastAPI app, proxy logic |
+| `agentbreak/config.py` | `application.yaml` Pydantic models, registry I/O |
+| `agentbreak/scenarios.py` | `scenarios.yaml` schema and validation |
+| `agentbreak/behaviors.py` | Response mutation helpers |
+| `agentbreak/discovery/mcp.py` | MCP server inspection |
+| `tests/` | Pytest suite (`agentbreak verify` runs these) |
+| `examples/` | LangChain, LangGraph, MCP servers, live harness |
 
 ## Guidelines
 
-- Keep the tool small and focused.
-- Prefer simple CLI and config behavior over extra abstraction.
-- Add or update tests for behavior changes.
-- Update the README when user-facing behavior changes.
-- Avoid adding provider-specific logic unless it is required for OpenAI-compatible APIs.
+- Keep the product surface small.
+- Prefer one clear path over several aliases or modes.
+- Keep scenarios explicit and typed.
+- Preserve test isolation so `agentbreak verify` stays deterministic.
+- Update docs when config shape or fault types change.
 
-## Pull Requests
-
-- Keep PRs scoped.
-- Include a short summary of user-visible changes.
-- Mention how you verified the change.
+See also [AGENTS.md](AGENTS.md) and [docs/README.md](docs/README.md).
