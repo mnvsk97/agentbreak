@@ -19,8 +19,8 @@ Keep the surface small and explicit: typed YAML config, reproducible scenarios, 
 | `agentbreak/behaviors.py` | Response mutation helpers |
 | `agentbreak/discovery/mcp.py` | MCP inspection and parsing |
 | `tests/` | Pytest suite; `agentbreak verify` runs pytest |
-| `examples/` | LangChain, LangGraph, MCP servers, live harness |
-| `docs/` | Failure modes, deferred scenarios, live testing notes |
+| `examples/` | LangChain, LangGraph, MCP servers |
+| `docs/` | Failure modes, deferred scenarios |
 | `skills/` | Claude Code skills (`agentbreak-run-tests`, `agentbreak-create-tests`) |
 
 ## Config
@@ -41,7 +41,6 @@ agentbreak serve   --config application.yaml --scenarios scenarios.yaml
 agentbreak inspect --config application.yaml   # MCP only; writes registry
 
 agentbreak verify        # pytest
-agentbreak verify --live # pytest + LangGraph live harness
 ```
 
 ## When Changing Behavior

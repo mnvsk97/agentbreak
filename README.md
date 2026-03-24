@@ -11,9 +11,9 @@ Agent  →  AgentBreak (localhost:5005)  →  Real LLM / MCP server
 ## Quick start
 
 ```bash
-pip install agentbreak              # core only
-# or, for development / running tests:
-pip install agentbreak[dev]         # includes pytest
+git clone https://github.com/mnvsk97/agentbreak.git && cd agentbreak
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'            # or just pip install -e . for core only
 
 cp config.example.yaml application.yaml    # edit: llm.mode, mcp.enabled
 cp scenarios.example.yaml scenarios.yaml   # edit: faults to inject
@@ -28,13 +28,12 @@ curl localhost:5005/_agentbreak/scorecard
 
 ## Config
 
-**application.yaml** -- what to proxy:
+**application.yaml** -- what to proxy (see `config.example.yaml`):
 
 ```yaml
 llm:
   enabled: true
-  mode: mock           # mock (no API key) or proxy (forwards to upstream)
-  upstream_url: https://api.openai.com
+  mode: mock           # mock (no API key needed) or proxy (forwards to upstream)
 mcp:
   enabled: false       # set true + upstream_url for MCP testing
 serve:

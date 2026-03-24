@@ -12,7 +12,6 @@ pip install -e '.[dev]'   # includes pytest; use '.' for core only
 
 ```bash
 agentbreak verify                                                    # run pytest
-agentbreak verify --live                                             # pytest + live LangGraph harness
 agentbreak validate --config application.yaml --scenarios scenarios.yaml  # check config
 agentbreak inspect --config application.yaml                         # discover MCP tools
 agentbreak serve --config application.yaml --scenarios scenarios.yaml     # start proxy
@@ -28,7 +27,7 @@ agentbreak serve --config application.yaml --scenarios scenarios.yaml     # star
 | `agentbreak/behaviors.py` | Response mutation helpers |
 | `agentbreak/discovery/mcp.py` | MCP server inspection |
 | `tests/` | Pytest suite (`agentbreak verify` runs these) |
-| `examples/` | LangChain, LangGraph, MCP servers, live harness |
+| `examples/` | LangChain, LangGraph, MCP servers |
 
 ## Guidelines
 

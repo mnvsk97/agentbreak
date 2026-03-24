@@ -21,10 +21,14 @@ cp .env.example .env
 langgraph dev
 ```
 
-## `live_harness`
+## `deepagents`
 
-Automated E2E test — boots everything (mock OpenAI, MCP server, AgentBreak, LangGraph agent) and runs traffic through.
+Lightweight ReAct agent built directly on the `openai` SDK (DeepAgents style). No framework beyond the SDK — just a tool-calling loop with retry logic. Point `OPENAI_BASE_URL` at AgentBreak to chaos-test.
 
 ```bash
-agentbreak verify --live
+cd examples/deepagents
+pip install -r requirements.txt
+cp .env.example .env
+python agent.py
 ```
+

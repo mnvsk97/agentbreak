@@ -1,21 +1,56 @@
 llm:
   enabled: true
-  mode: proxy
-  upstream_url: https://api.openai.com
-  auth:
-    type: bearer
-    env: OPENAI_API_KEY
+  mode: mock                       # mock (no API key needed) or proxy
+  # Single upstream (simple):
+  # upstream_url: https://api.openai.com
+  # auth:
+  #   type: bearer
+  #   env: OPENAI_API_KEY
+  #
+  # Multi-model (advanced):
+  # upstreams:
+  #   - name: gpt-4o
+  #     url: https://api.openai.com
+  #     api_key_env: OPENAI_API_KEY
+  #   - name: claude-sonnet
+  #     url: https://api.anthropic.com
+  #     api_key_env: ANTHROPIC_API_KEY
 
 mcp:
-  enabled: true
-  upstream_url: https://mcp.example.com
-  transport: streamable_http
-  auth:
-    type: bearer
-    env: MCP_API_KEY
+  enabled: false                   # set true + upstream_url for MCP testing
+  # upstream_url: https://mcp.example.com
+  # transport: streamable_http
+  #
+  # Auth examples (uncomment one):
+  #
+  # auth:
+  #   type: bearer
+  #   env: MCP_TOKEN
+  #
+  # auth:
+  #   type: basic
+  #   username: agent
+  #   password_env: MCP_PASSWORD
+  #
+  # auth:
+  #   type: header
+  #   header_name: X-API-Key
+  #   header_value_env: MCP_API_KEY
+  #
+  # auth:
+  #   type: oauth2_client_credentials
+  #   token_url: https://auth.example.com/oauth/token
+  #   client_id: my-agent
+  #   client_secret_env: MCP_CLIENT_SECRET
+  #   scopes: ["mcp:read", "mcp:write"]
+  #
   # Run `agentbreak inspect --config application.yaml` to generate
   # `.agentbreak/registry.json` with tools, resources, and prompts.
 
 serve:
   host: 0.0.0.0
-  port: 5000
+  port: 5005
+
+history:
+  enabled: false                 # set true to persist run data to SQLite
+  db_path: .agentbreak/history.db

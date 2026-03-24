@@ -282,7 +282,7 @@ Ctrl+C the `agentbreak serve` process. It prints the final scorecard to stderr.
 | `agentbreak serve` | Start the chaos proxy. Flags: `--config`, `--scenarios`, `--registry`, `-v` |
 | `agentbreak validate` | Check configs without starting. Flags: `--config`, `--scenarios`, `--registry` |
 | `agentbreak inspect` | Discover MCP tools, write registry. Flags: `--config`, `--registry` |
-| `agentbreak verify` | Run test suite. Flag: `--live` for full E2E harness |
+| `agentbreak verify` | Run test suite |
 
 ## Common issues
 

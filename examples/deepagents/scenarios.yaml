@@ -1,0 +1,30 @@
+version: 1
+scenarios:
+  - name: llm-rate-limit
+    summary: Simulate rate limiting from the LLM provider
+    target: llm_chat
+    fault:
+      kind: http_error
+      status_code: 429
+    schedule:
+      mode: random
+      probability: 0.2
+  - name: llm-slow
+    summary: Add latency to LLM responses
+    target: llm_chat
+    fault:
+      kind: latency
+      min_ms: 2000
+      max_ms: 5000
+    schedule:
+      mode: random
+      probability: 0.3
+  - name: mcp-tool-failure
+    summary: Simulate MCP tool failures
+    target: mcp_tool
+    fault:
+      kind: http_error
+      status_code: 503
+    schedule:
+      mode: random
+      probability: 0.15

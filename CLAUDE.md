@@ -37,8 +37,7 @@ Bundled workflows under **`skills/`** (install via `npx skills add mnvsk97/agent
 | `docs/README.md` | Index of extra docs |
 | `docs/FAILURE_MODES.md` | Scope of simulated failures |
 | `docs/TODO_SCENARIOS.md` | Deferred scenario targets |
-| `docs/live-testing.md` | `agentbreak verify --live` harness |
 
 ## Verification
 
-Before suggesting a change is done: run **`agentbreak verify`**. Use **`agentbreak verify --live`** only when the change touches the live harness or full stack.
+Before suggesting a change is done: run **`agentbreak verify`**.
