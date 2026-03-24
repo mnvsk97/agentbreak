@@ -94,6 +94,28 @@ serve:
   port: 5005
 ```
 
+**MCP auth variants:**
+
+Bearer (shown above) is the simplest. Two other auth types are supported:
+
+```yaml
+# Basic auth
+mcp:
+  auth:
+    type: basic
+    username: agent
+    password_env: MCP_PASSWORD
+
+# OAuth2 client credentials
+mcp:
+  auth:
+    type: oauth2_client_credentials
+    token_url: https://auth.example.com/oauth/token
+    client_id: my-agent
+    client_secret_env: MCP_CLIENT_SECRET
+    scopes: ["mcp:read", "mcp:write"]
+```
+
 IMPORTANT: On macOS, port 5000 is often taken by AirPlay Receiver. Use port 5005 or another free port.
 
 ### Step 4: Configure scenarios.yaml
@@ -274,6 +296,8 @@ Ctrl+C the `agentbreak serve` process. It prints the final scorecard to stderr.
 | `GET /_agentbreak/llm-requests` | LLM recent requests (explicit) |
 | `GET /_agentbreak/mcp-scorecard` | MCP scorecard |
 | `GET /_agentbreak/mcp-requests` | MCP recent requests |
+| `GET /_agentbreak/history` | All recorded runs (requires `history.enabled: true`) |
+| `GET /_agentbreak/history/{run_id}` | Details for a single run |
 
 ## All CLI commands
 
@@ -282,7 +306,7 @@ Ctrl+C the `agentbreak serve` process. It prints the final scorecard to stderr.
 | `agentbreak serve` | Start the chaos proxy. Flags: `--config`, `--scenarios`, `--registry`, `-v` |
 | `agentbreak validate` | Check configs without starting. Flags: `--config`, `--scenarios`, `--registry` |
 | `agentbreak inspect` | Discover MCP tools, write registry. Flags: `--config`, `--registry` |
-| `agentbreak verify` | Run test suite |
+| `agentbreak verify` | Run test suite (no flags) |
 
 ## Common issues
 

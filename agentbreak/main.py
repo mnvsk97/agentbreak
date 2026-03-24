@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, Response
 
 from agentbreak import __version__
 from agentbreak.behaviors import apply_response_behavior
-from agentbreak.config import ApplicationConfig, MCPRegistry, UpstreamConfig, load_application_config, load_registry, save_registry
+from agentbreak.config import ApplicationConfig, MCPRegistry, load_application_config, load_registry, save_registry
 from agentbreak.discovery.mcp import MCP_PROTOCOL_VERSION, inspect_mcp_server, parse_mcp_response
 from agentbreak.history import RunHistory
 from agentbreak.scenarios import Scenario, ScenarioFile, load_scenarios, validate_supported_targets
@@ -41,7 +41,6 @@ class ServiceState:
     llm_runtime: LLMRuntime | None
     mcp_runtime: MCPRuntime | None
     history: RunHistory | None = None
-    run_id: int | None = None
 
 
 service_state: ServiceState | None = None
@@ -80,62 +79,14 @@ class MCPStats:
     recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=40))
 
 
-def _log_failure(history: RunHistory | None, run_id: int | None, target: str, scenario: Scenario, details: dict | None = None) -> None:
-    """Log a fault injection to history if persistence is enabled."""
-    if history is None or run_id is None:
-        return
-    try:
-        history.save_failure(
-            run_id=run_id,
-            target=target,
-            scenario_name=scenario.name,
-            fault_kind=scenario.fault.kind,
-            details=details,
-        )
-    except Exception:
-        logger.debug("failed to persist failure record", exc_info=True)
-
-
 @dataclass
 class LLMRuntime:
     mode: str
     upstream_url: str
     auth_headers: dict[str, str]
     scenarios: list[Scenario]
-    upstreams: list[UpstreamConfig] = field(default_factory=list)
     stats: LLMStats = field(default_factory=LLMStats)
-    stats_by_upstream: dict[str, LLMStats] = field(default_factory=dict)
     scenario_counters: dict[str, int] = field(default_factory=dict)
-    _rr_index: int = field(default=0, repr=False)
-
-    def _resolve_upstream(self, model: str | None) -> UpstreamConfig | None:
-        """Pick an upstream by matching the model name, or round-robin if no match."""
-        if not self.upstreams:
-            return None
-        if model:
-            for up in self.upstreams:
-                if up.name == model:
-                    return up
-        # round-robin fallback
-        up = self.upstreams[self._rr_index % len(self.upstreams)]
-        self._rr_index += 1
-        return up
-
-    def _upstream_stats(self, name: str) -> LLMStats:
-        if name not in self.stats_by_upstream:
-            self.stats_by_upstream[name] = LLMStats()
-        return self.stats_by_upstream[name]
-
-    def _get_upstream_url_and_headers(self, up: UpstreamConfig | None, request_headers: Any) -> tuple[str, dict[str, str]]:
-        if up is None:
-            return self.upstream_url, filter_request_headers(request_headers, self.auth_headers)
-        headers = up.auth.headers()
-        if not headers and up.api_key_env:
-            import os
-            token = os.getenv(up.api_key_env)
-            if token:
-                headers = {"authorization": f"Bearer {token}"}
-        return up.url, filter_request_headers(request_headers, headers)
 
     async def handle_chat(self, request: Request) -> Response:
         body = await request.body()
@@ -143,16 +94,10 @@ class LLMRuntime:
         payload, has_parse_error = parse_json_body(body)
         if has_parse_error:
             return JSONResponse(status_code=400, content=openai_error(400, message_override="Malformed JSON request body."))
-
-        model = payload.get("model")
-        upstream_cfg = self._resolve_upstream(model)
-        upstream_name = upstream_cfg.name if upstream_cfg else "default"
-        per_upstream = self._upstream_stats(upstream_name)
-
         scenario = choose_matching_scenario(
             self.scenarios,
             "llm_chat",
-            {"route": str(request.url.path), "method": request.method, "model": model},
+            {"route": str(request.url.path), "method": request.method, "model": payload.get("model")},
             self.scenario_counters,
         )
 
@@ -160,41 +105,32 @@ class LLMRuntime:
             logger.debug("matched scenario %s for llm_chat", scenario.name)
             if scenario.fault.kind == "latency":
                 self.stats.latency_injections += 1
-                per_upstream.latency_injections += 1
                 await apply_latency_fault(scenario)
             elif scenario.fault.kind == "http_error":
                 self.stats.injected_faults += 1
                 self.stats.upstream_failures += 1
-                per_upstream.injected_faults += 1
-                per_upstream.upstream_failures += 1
                 logger.info("injecting http_error %d via %s", scenario.fault.status_code or 500, scenario.name)
-                state = service_state
-                if state:
-                    _log_failure(state.history, state.run_id, "llm_chat", scenario, {"status_code": scenario.fault.status_code or 500})
                 return JSONResponse(status_code=scenario.fault.status_code or 500, content=openai_error(scenario.fault.status_code or 500))
 
         if self.mode == "mock":
             response_body = json.dumps(mock_completion()).encode("utf-8")
         else:
-            resolved_url, resolved_headers = self._get_upstream_url_and_headers(upstream_cfg, request.headers)
             async with httpx.AsyncClient(timeout=120.0) as client:
                 try:
                     upstream = await client.post(
-                        f"{resolved_url.rstrip('/')}/v1/chat/completions",
+                        f"{self.upstream_url.rstrip('/')}/v1/chat/completions",
                         content=body,
-                        headers=resolved_headers,
+                        headers=filter_request_headers(request.headers, self.auth_headers),
                     )
                 except httpx.HTTPError as exc:
                     self.stats.upstream_failures += 1
-                    per_upstream.upstream_failures += 1
-                    logger.warning("upstream %s unreachable: %s", upstream_name, exc)
+                    logger.warning("upstream unreachable: %s", exc)
                     return JSONResponse(
                         status_code=502,
-                        content={"error": {"message": f"AgentBreak could not reach upstream {upstream_name}: {exc}", "type": "upstream_connection_error", "code": 502}},
+                        content={"error": {"message": f"AgentBreak could not reach upstream: {exc}", "type": "upstream_connection_error", "code": 502}},
                     )
             if upstream.status_code >= 400:
                 self.stats.upstream_failures += 1
-                per_upstream.upstream_failures += 1
                 return Response(
                     content=upstream.content,
                     status_code=upstream.status_code,
@@ -207,15 +143,9 @@ class LLMRuntime:
             response_body = mutate_llm_body(response_body, scenario)
             self.stats.response_mutations += 1
             self.stats.upstream_successes += 1
-            per_upstream.response_mutations += 1
-            per_upstream.upstream_successes += 1
-            state = service_state
-            if state:
-                _log_failure(state.history, state.run_id, "llm_chat", scenario, {"fault_kind": scenario.fault.kind})
             return Response(content=response_body, status_code=200, media_type="application/json")
 
         self.stats.upstream_successes += 1
-        per_upstream.upstream_successes += 1
         if self.mode == "proxy":
             return Response(
                 content=response_body,
@@ -225,39 +155,30 @@ class LLMRuntime:
             )
         return Response(content=response_body, status_code=200, media_type="application/json")
 
-    def _scorecard_from_stats(self, stats: LLMStats) -> dict[str, Any]:
+    def scorecard_data(self) -> dict[str, Any]:
         score = 100
-        score -= stats.injected_faults * 3
-        score -= stats.upstream_failures * 12
-        score -= stats.duplicate_requests * 2
-        score -= stats.suspected_loops * 10
+        score -= self.stats.injected_faults * 3
+        score -= self.stats.upstream_failures * 12
+        score -= self.stats.duplicate_requests * 2
+        score -= self.stats.suspected_loops * 10
         score = max(0, min(100, score))
-        if stats.upstream_failures == 0 and stats.suspected_loops == 0:
+        if self.stats.upstream_failures == 0 and self.stats.suspected_loops == 0:
             outcome = "PASS"
-        elif stats.upstream_successes > 0:
+        elif self.stats.upstream_successes > 0:
             outcome = "DEGRADED"
         else:
             outcome = "FAIL"
         return {
-            "requests_seen": stats.total_requests,
-            "injected_faults": stats.injected_faults,
-            "latency_injections": stats.latency_injections,
-            "upstream_successes": stats.upstream_successes,
-            "upstream_failures": stats.upstream_failures,
-            "duplicate_requests": stats.duplicate_requests,
-            "suspected_loops": stats.suspected_loops,
+            "requests_seen": self.stats.total_requests,
+            "injected_faults": self.stats.injected_faults,
+            "latency_injections": self.stats.latency_injections,
+            "upstream_successes": self.stats.upstream_successes,
+            "upstream_failures": self.stats.upstream_failures,
+            "duplicate_requests": self.stats.duplicate_requests,
+            "suspected_loops": self.stats.suspected_loops,
             "run_outcome": outcome,
             "resilience_score": score,
         }
-
-    def scorecard_data(self) -> dict[str, Any]:
-        data = self._scorecard_from_stats(self.stats)
-        if self.stats_by_upstream:
-            data["by_upstream"] = {
-                name: self._scorecard_from_stats(s)
-                for name, s in self.stats_by_upstream.items()
-            }
-        return data
 
     def current_requests(self) -> dict[str, Any]:
         return {"recent_requests": list(self.stats.recent_requests)}
@@ -413,18 +334,12 @@ class MCPRuntime:
                 self.stats.upstream_failures += 1
                 if method == "tools/call":
                     self.stats.tool_failures_by_name[action_name] += 1
-                state = service_state
-                if state:
-                    _log_failure(state.history, state.run_id, "mcp_tool", scenario, {"action": action_name, "fault_kind": "timeout"})
                 return JSONResponse(status_code=504, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32001, "message": "MCP action timed out"}})
         if scenario is not None and scenario.fault.kind == "http_error":
             self.stats.injected_faults += 1
             self.stats.upstream_failures += 1
             if method == "tools/call":
                 self.stats.tool_failures_by_name[action_name] += 1
-            state = service_state
-            if state:
-                _log_failure(state.history, state.run_id, "mcp_tool", scenario, {"action": action_name, "status_code": scenario.fault.status_code or 500})
             return JSONResponse(status_code=scenario.fault.status_code or 500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "AgentBreak injected MCP transport error"}})
 
         result = await self._call_upstream_or_mock(method, params, request_id)
@@ -435,9 +350,6 @@ class MCPRuntime:
         if scenario is not None and scenario.fault.kind in {"empty_response", "invalid_json", "schema_violation", "wrong_content", "large_response"}:
             mutated = mutate_mcp_result(result, scenario)
             self.stats.response_mutations += 1
-            state = service_state
-            if state:
-                _log_failure(state.history, state.run_id, "mcp_tool", scenario, {"action": action_name, "fault_kind": scenario.fault.kind})
             if isinstance(mutated, bytes):
                 self.stats.injected_faults += 1
                 self.stats.upstream_successes += 1
@@ -616,7 +528,6 @@ def load_service_state(
             upstream_url=application.llm.upstream_url,
             auth_headers=application.llm.auth.headers(),
             scenarios=scenarios.scenarios,
-            upstreams=application.llm.upstreams,
         )
 
     mcp_runtime = None
@@ -628,16 +539,7 @@ def load_service_state(
             scenarios=scenarios.scenarios,
         )
 
-    history: RunHistory | None = None
-    run_id: int | None = None
-    if application.history.enabled:
-        history = RunHistory(db_path=application.history.db_path)
-        run_id = history.save_run(
-            llm_scorecard=None,
-            mcp_scorecard=None,
-            scenarios=[s.model_dump() for s in scenarios.scenarios] if scenarios.scenarios else None,
-            label=None,
-        )
+    history = RunHistory(db_path=application.history.db_path) if application.history.enabled else None
 
     return ServiceState(
         application=application,
@@ -646,7 +548,6 @@ def load_service_state(
         llm_runtime=llm_runtime,
         mcp_runtime=mcp_runtime,
         history=history,
-        run_id=run_id,
     )
 
 
@@ -907,19 +808,15 @@ def print_scorecard() -> None:
 
 
 def _save_run_to_history() -> None:
-    """Persist final scorecard data to history DB when the server shuts down."""
     state = service_state
-    if state is None or state.history is None or state.run_id is None:
+    if state is None or state.history is None:
         return
     try:
         llm_scorecard = state.llm_runtime.scorecard_data() if state.llm_runtime else None
         mcp_scorecard = state.mcp_runtime.scorecard_data() if state.mcp_runtime else None
-        with state.history._connect() as conn:
-            conn.execute(
-                "UPDATE runs SET llm_scorecard = ?, mcp_scorecard = ? WHERE id = ?",
-                (json.dumps(llm_scorecard), json.dumps(mcp_scorecard), state.run_id),
-            )
-        logger.info("saved run %d to history", state.run_id)
+        scenarios = [s.model_dump() for s in state.scenarios.scenarios] if state.scenarios.scenarios else None
+        state.history.save_run(llm_scorecard=llm_scorecard, mcp_scorecard=mcp_scorecard, scenarios=scenarios)
+        logger.info("saved run to history")
     except Exception:
         logger.debug("failed to save run to history", exc_info=True)
 
@@ -997,7 +894,7 @@ async def get_agentbreak_mcp_requests() -> dict[str, Any]:
 async def get_agentbreak_history(limit: int = 20) -> dict[str, Any]:
     state = require_service_state()
     if state.history is None:
-        return {"runs": [], "message": "History is disabled. Set history.enabled: true in application.yaml."}
+        return {"runs": []}
     return {"runs": state.history.get_runs(limit=limit)}
 
 

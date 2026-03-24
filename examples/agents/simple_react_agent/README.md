@@ -1,19 +1,19 @@
-# Simple ReAct Agent
+# Simple ReAct Agent (LangGraph)
 
 LangGraph ReAct agent that uses an OpenAI-compatible LLM and MCP reporting tools.
 
-## Quick start
+## Setup
 
 ```bash
-cd examples/simple_react_agent
+cd examples/agents/simple_react_agent
 pip install -r requirements.txt
-cp .env.example .env    # edit: OPENAI_BASE_URL, REPORT_MCP_URL
+cp .env.example .env
 langgraph dev
 ```
 
-## Chaos testing with AgentBreak
+## Chaos testing
 
-Point both URLs at AgentBreak instead of the real backends:
+Point both URLs at AgentBreak:
 
 ```env
 OPENAI_BASE_URL=http://127.0.0.1:5005/v1

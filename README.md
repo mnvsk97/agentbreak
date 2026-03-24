@@ -88,4 +88,4 @@ npx skills add mnvsk97/agentbreak
 
 ## Examples
 
-See [examples/](examples/) -- ReAct agent, MCP server, E2E harness.
+See [examples/](examples/) -- agents (ReAct, DeepAgents) and MCP servers (no auth, bearer, basic, OAuth2).
