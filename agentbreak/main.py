@@ -27,7 +27,7 @@ from agentbreak.behaviors import apply_response_behavior
 from agentbreak.config import ApplicationConfig, MCPRegistry, load_application_config, load_registry, save_registry
 from agentbreak.discovery.mcp import MCP_PROTOCOL_VERSION, inspect_mcp_server, parse_mcp_response
 from agentbreak.history import RunHistory
-from agentbreak.scenarios import Scenario, ScenarioFile, load_scenarios, validate_supported_targets
+from agentbreak.scenarios import Scenario, ScenarioFile, load_scenarios, validate_scenarios
 
 
 cli = typer.Typer(
@@ -307,6 +307,7 @@ class LLMRuntime:
             "latency_injections": self.stats.latency_injections,
             "upstream_successes": self.stats.upstream_successes,
             "upstream_failures": self.stats.upstream_failures,
+            "response_mutations": self.stats.response_mutations,
             "duplicate_requests": self.stats.duplicate_requests,
             "suspected_loops": self.stats.suspected_loops,
             "run_outcome": outcome,
@@ -649,7 +650,7 @@ def load_service_state(
 ) -> ServiceState:
     application = load_application_config(config_path)
     scenarios = load_scenarios(scenarios_path)
-    validate_supported_targets(scenarios)
+    validate_scenarios(scenarios)
     registry = MCPRegistry()
     if application.mcp.enabled:
         registry = load_registry(registry_path)
@@ -1068,20 +1069,15 @@ async def get_agentbreak_requests() -> dict[str, Any]:
     return state.llm_runtime.current_requests()
 
 
+
 @app.get("/_agentbreak/llm-scorecard")
 async def get_agentbreak_llm_scorecard() -> dict[str, Any]:
-    state = require_service_state()
-    if state.llm_runtime is None:
-        return {"requests_seen": 0}
-    return state.llm_runtime.scorecard_data()
+    return await get_agentbreak_scorecard()
 
 
 @app.get("/_agentbreak/llm-requests")
 async def get_agentbreak_llm_requests() -> dict[str, Any]:
-    state = require_service_state()
-    if state.llm_runtime is None:
-        return {"recent_requests": []}
-    return state.llm_runtime.current_requests()
+    return await get_agentbreak_requests()
 
 
 @app.get("/_agentbreak/mcp-scorecard")

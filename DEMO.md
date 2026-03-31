@@ -19,15 +19,16 @@ python examples/mcp_servers/no_auth/main.py
 ## Tab 2 — AgentBreak
 
 ```bash
-agentbreak inspect --config application.yaml
+agentbreak init
+agentbreak inspect
 ```
 
 ```bash
-cat scenarios.yaml
+cat .agentbreak/scenarios.yaml
 ```
 
 ```bash
-agentbreak serve --config application.yaml --scenarios scenarios.yaml -v
+agentbreak serve -v
 ```
 
 ---

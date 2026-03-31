@@ -15,7 +15,7 @@ def reset_global_state() -> None:
             {
                 "llm": {"enabled": True, "mode": "proxy", "upstream_url": "https://upstream.example"},
                 "mcp": {"enabled": False},
-                "serve": {"host": "127.0.0.1", "port": 5000},
+                "serve": {"host": "127.0.0.1", "port": 5005},
             }
         ),
         scenarios=ScenarioFile(),

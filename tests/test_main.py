@@ -21,7 +21,7 @@ def write_application(path: Path, *, llm: dict | None = None, mcp: dict | None =
     payload = {
         "llm": {"enabled": True, "mode": "proxy", "upstream_url": "https://upstream.example"},
         "mcp": {"enabled": False},
-        "serve": {"host": "127.0.0.1", "port": 5000},
+        "serve": {"host": "127.0.0.1", "port": 5005},
     }
     if llm is not None:
         payload["llm"].update(llm)
@@ -129,7 +129,7 @@ def test_load_scenarios_expands_presets(tmp_path: Path) -> None:
     assert {scenario.target for scenario in scenario_file.scenarios} == {"mcp_tool"}
 
 
-def test_validate_rejects_unimplemented_targets(tmp_path: Path) -> None:
+def test_validate_rejects_unsupported_targets(tmp_path: Path) -> None:
     application_path = tmp_path / "application.yaml"
     scenarios_path = tmp_path / "scenarios.yaml"
     write_application(application_path)
@@ -138,7 +138,7 @@ def test_validate_rejects_unimplemented_targets(tmp_path: Path) -> None:
         [
             {
                 "name": "memory-poison",
-                "summary": "Reserved target",
+                "summary": "Unsupported target",
                 "target": "memory",
                 "match": {},
                 "fault": {"kind": "wrong_content", "body": "poison"},
@@ -149,7 +149,7 @@ def test_validate_rejects_unimplemented_targets(tmp_path: Path) -> None:
 
     result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--scenarios", str(scenarios_path)])
     assert result.exit_code != 0
-    assert "Recognized but unimplemented scenario targets" in str(result.exception)
+    assert "Unsupported scenario targets" in str(result.exception)
 
 
 def test_validate_rejects_llm_timeout_fault(tmp_path: Path) -> None:
@@ -172,7 +172,7 @@ def test_validate_rejects_llm_timeout_fault(tmp_path: Path) -> None:
 
     result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--scenarios", str(scenarios_path)])
     assert result.exit_code != 0
-    assert "llm_chat timeout faults are not implemented" in str(result.exception)
+    assert "llm_chat timeout faults are not supported" in str(result.exception)
 
 
 def test_mcp_only_mock_config_is_valid() -> None:
@@ -180,7 +180,7 @@ def test_mcp_only_mock_config_is_valid() -> None:
         {
             "llm": {"enabled": False},
             "mcp": {"enabled": True},
-            "serve": {"host": "127.0.0.1", "port": 5000},
+            "serve": {"host": "127.0.0.1", "port": 5005},
         }
     )
     assert config.mcp.enabled is True
@@ -298,7 +298,7 @@ def test_inspect_collects_paginated_tools_resources_and_prompts(monkeypatch) -> 
                 {
                     "llm": {"enabled": False},
                     "mcp": {"enabled": True, "upstream_url": "https://mcp.example.com"},
-                    "serve": {"host": "127.0.0.1", "port": 5000},
+                    "serve": {"host": "127.0.0.1", "port": 5005},
                 }
             ).mcp
         )
@@ -694,7 +694,7 @@ def test_discovery_client_inspects_mcp_tools(monkeypatch) -> None:
                 {
                     "llm": {"enabled": False},
                     "mcp": {"enabled": True, "upstream_url": "https://mcp.example.com"},
-                    "serve": {"host": "127.0.0.1", "port": 5000},
+                    "serve": {"host": "127.0.0.1", "port": 5005},
                 }
             ).mcp
         )

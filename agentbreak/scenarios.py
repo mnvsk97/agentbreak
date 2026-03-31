@@ -8,7 +8,6 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
-IMPLEMENTED_TARGETS = {"llm_chat", "mcp_tool"}
 PRESET_SCENARIOS: dict[str, list[dict[str, Any]]] = {
     "brownout": [
         {
@@ -80,6 +79,8 @@ Target = Literal[
     "multi_agent",
     "telemetry",
 ]
+
+SUPPORTED_TARGETS = {"llm_chat", "mcp_tool"}
 
 FaultKind = Literal[
     "http_error",
@@ -195,13 +196,15 @@ def load_scenarios(path: str | None) -> ScenarioFile:
     return ScenarioFile.model_validate(data)
 
 
-def validate_supported_targets(scenarios: ScenarioFile) -> None:
-    unsupported = sorted({scenario.target for scenario in scenarios.scenarios if scenario.target not in IMPLEMENTED_TARGETS})
+def validate_scenarios(scenarios: ScenarioFile) -> None:
+    unsupported = sorted({scenario.target for scenario in scenarios.scenarios if scenario.target not in SUPPORTED_TARGETS})
     if unsupported:
         raise ValueError(
-            "Recognized but unimplemented scenario targets: "
+            "Unsupported scenario targets: "
             + ", ".join(unsupported)
-            + ". See docs/TODO_SCENARIOS.md."
+            + ". Currently supported: "
+            + ", ".join(sorted(SUPPORTED_TARGETS))
+            + ". See docs/TODO_SCENARIOS.md for the roadmap."
         )
     invalid = sorted(
         scenario.name
@@ -209,4 +212,4 @@ def validate_supported_targets(scenarios: ScenarioFile) -> None:
         if scenario.target == "llm_chat" and scenario.fault.kind == "timeout"
     )
     if invalid:
-        raise ValueError("llm_chat timeout faults are not implemented: " + ", ".join(invalid))
+        raise ValueError("llm_chat timeout faults are not supported: " + ", ".join(invalid))

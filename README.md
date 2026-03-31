@@ -60,15 +60,128 @@ scenarios:
 
 Or use a preset: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
 
-## Fault kinds
+## Writing your own scenarios
 
-`http_error`, `latency`, `timeout` (MCP only), `empty_response`, `invalid_json`, `schema_violation`, `wrong_content`, `large_response`
+Each scenario has a **target**, a **fault**, and a **schedule**. You can add as many as you want to `scenarios.yaml`.
+
+### Targets
+
+| Target | What it hits |
+|--------|-------------|
+| `llm_chat` | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` |
+| `mcp_tool` | MCP tool calls, resource reads, prompt gets |
+
+### Fault kinds
+
+| Fault | What it does | Required fields |
+|-------|-------------|-----------------|
+| `http_error` | Returns an HTTP error | `status_code` |
+| `latency` | Adds a random delay | `min_ms`, `max_ms` |
+| `timeout` | Delay + 504 (MCP only) | `min_ms`, `max_ms` |
+| `empty_response` | Returns empty body | -- |
+| `invalid_json` | Returns unparseable JSON | -- |
+| `schema_violation` | Corrupts response structure | -- |
+| `wrong_content` | Replaces response content | `body` (optional) |
+| `large_response` | Returns oversized response | `size_bytes` |
+
+### Schedules
+
+| Mode | Fields | Behavior |
+|------|--------|----------|
+| `always` | -- | Every matching request |
+| `random` | `probability` (0.0-1.0) | Probabilistic |
+| `periodic` | `every`, `length` | `length` faults every `every` requests |
+
+### Targeting specific tools or models
+
+Use the `match` field to scope faults:
+
+```yaml
+# Only affect GPT-4o requests
+- name: gpt4o-errors
+  summary: Errors on GPT-4o only
+  target: llm_chat
+  match:
+    model: gpt-4o
+  fault:
+    kind: http_error
+    status_code: 429
+  schedule:
+    mode: random
+    probability: 0.3
+
+# Only affect a specific MCP tool
+- name: search-timeout
+  summary: search_docs times out
+  target: mcp_tool
+  match:
+    tool_name: search_docs
+  fault:
+    kind: timeout
+    min_ms: 5000
+    max_ms: 10000
+  schedule:
+    mode: always
+
+# Wildcard match on tool names
+- name: search-tools-slow
+  summary: All search_* tools are slow
+  target: mcp_tool
+  match:
+    tool_name_pattern: "search_*"
+  fault:
+    kind: latency
+    min_ms: 3000
+    max_ms: 8000
+  schedule:
+    mode: random
+    probability: 0.5
+```
+
+### Presets
+
+Skip manual config and use a built-in bundle:
+
+```yaml
+preset: brownout
+# or combine a preset with custom scenarios:
+preset: brownout
+scenarios:
+  - name: custom-fault
+    summary: My extra fault
+    target: mcp_tool
+    fault:
+      kind: http_error
+      status_code: 503
+    schedule:
+      mode: random
+      probability: 0.2
+```
+
+Available presets: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
 
 ## MCP testing
 
 ```bash
 agentbreak inspect    # discover tools from upstream MCP server
 agentbreak serve      # proxy both LLM and MCP traffic
+```
+
+## Run history
+
+Track resilience over time:
+
+```yaml
+# in .agentbreak/application.yaml
+history:
+  enabled: true
+```
+
+```bash
+agentbreak serve --label "added retry logic"
+# ... run your agent ...
+agentbreak history                    # list past runs
+agentbreak history compare 1 2        # diff two runs
 ```
 
 ## CLI
@@ -79,15 +192,18 @@ agentbreak serve      # start proxy
 agentbreak validate   # check config
 agentbreak inspect    # discover MCP tools
 agentbreak verify     # run tests
+agentbreak history    # view past runs
 ```
 
-## Claude Code skill
+## Claude Code
+
+If you use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), you can run AgentBreak as a guided skill instead of using the CLI directly:
 
 ```bash
 npx skills add mnvsk97/agentbreak
 ```
 
-Then use `/agentbreak` to chaos-test your agent with a guided workflow.
+Then type `/agentbreak` in Claude Code. The skill will scan your codebase, detect your LLM provider and MCP tools, generate tailored chaos scenarios, start the proxy, and walk you through interpreting the results.
 
 ## Examples
 

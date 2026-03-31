@@ -102,13 +102,12 @@ class LLMConfig(BaseModel):
 class MCPConfig(BaseModel):
     enabled: bool = False
     upstream_url: str = ""
-    transport: Literal["streamable_http"] = "streamable_http"
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
 
 class ServeConfig(BaseModel):
     host: str = "0.0.0.0"
-    port: int = 5000
+    port: int = 5005
 
 
 class HistoryConfig(BaseModel):
