@@ -1,161 +1,68 @@
 # AgentBreak
 
-Chaos proxy for testing how your agents handle failures. Sits between your agent and the LLM/MCP server, injects faults.
+Your agent works great — until the LLM times out, returns garbage, or an MCP tool fails. AgentBreak lets you test for that *before* production.
+
+It's a chaos proxy that sits between your agent and the real API, injecting faults like latency spikes, HTTP errors, and malformed responses so you can see how your agent actually handles failure.
 
 ```
 Agent  -->  AgentBreak (localhost:5005)  -->  Real LLM / MCP server
                      ^
-          .agentbreak/scenarios.yaml defines faults
+          injects faults based on your scenarios
 ```
 
-## Quick start
+## Get started
 
 ```bash
 pip install agentbreak
 agentbreak init       # creates .agentbreak/ with default configs
-agentbreak serve      # start the chaos proxy
+agentbreak serve      # start the chaos proxy on port 5005
 ```
 
 Point your agent at `http://localhost:5005` instead of the real API:
 
-- OpenAI SDK: set `OPENAI_BASE_URL=http://localhost:5005/v1`
-- Anthropic SDK: set `ANTHROPIC_BASE_URL=http://localhost:5005`
+```bash
+# OpenAI
+export OPENAI_BASE_URL=http://localhost:5005/v1
 
-Check results:
+# Anthropic
+export ANTHROPIC_BASE_URL=http://localhost:5005
+```
+
+Run your agent, then check how it did:
 
 ```bash
 curl localhost:5005/_agentbreak/scorecard
 ```
 
-## Config
+That's it. No code changes needed — just swap the base URL.
 
-**`.agentbreak/application.yaml`** -- what to proxy:
+## How it works
 
-```yaml
-llm:
-  enabled: true
-  mode: mock           # mock (no API key needed) or proxy (forwards to upstream)
-mcp:
-  enabled: false       # set true + upstream_url for MCP testing
-serve:
-  port: 5005
-```
+AgentBreak reads two files from `.agentbreak/`:
 
-**`.agentbreak/scenarios.yaml`** -- what faults to inject:
+- **`application.yaml`** — what to proxy (LLM mode, MCP upstream, port)
+- **`scenarios.yaml`** — what faults to inject
+
+A scenario is just a target + a fault + a schedule:
 
 ```yaml
-version: 1
 scenarios:
   - name: slow-llm
     summary: Latency spike on completions
-    target: llm_chat
+    target: llm_chat          # what to hit (llm_chat or mcp_tool)
     fault:
-      kind: latency
+      kind: latency           # what goes wrong
       min_ms: 2000
       max_ms: 5000
     schedule:
-      mode: random
+      mode: random            # when it happens
       probability: 0.3
 ```
 
-Or use a preset: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
-
-## Writing your own scenarios
-
-Each scenario has a **target**, a **fault**, and a **schedule**. You can add as many as you want to `scenarios.yaml`.
-
-### Targets
-
-| Target | What it hits |
-|--------|-------------|
-| `llm_chat` | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages` |
-| `mcp_tool` | MCP tool calls, resource reads, prompt gets |
-
-### Fault kinds
-
-| Fault | What it does | Required fields |
-|-------|-------------|-----------------|
-| `http_error` | Returns an HTTP error | `status_code` |
-| `latency` | Adds a random delay | `min_ms`, `max_ms` |
-| `timeout` | Delay + 504 (MCP only) | `min_ms`, `max_ms` |
-| `empty_response` | Returns empty body | -- |
-| `invalid_json` | Returns unparseable JSON | -- |
-| `schema_violation` | Corrupts response structure | -- |
-| `wrong_content` | Replaces response content | `body` (optional) |
-| `large_response` | Returns oversized response | `size_bytes` |
-
-### Schedules
-
-| Mode | Fields | Behavior |
-|------|--------|----------|
-| `always` | -- | Every matching request |
-| `random` | `probability` (0.0-1.0) | Probabilistic |
-| `periodic` | `every`, `length` | `length` faults every `every` requests |
-
-### Targeting specific tools or models
-
-Use the `match` field to scope faults:
-
-```yaml
-# Only affect GPT-4o requests
-- name: gpt4o-errors
-  summary: Errors on GPT-4o only
-  target: llm_chat
-  match:
-    model: gpt-4o
-  fault:
-    kind: http_error
-    status_code: 429
-  schedule:
-    mode: random
-    probability: 0.3
-
-# Only affect a specific MCP tool
-- name: search-timeout
-  summary: search_docs times out
-  target: mcp_tool
-  match:
-    tool_name: search_docs
-  fault:
-    kind: timeout
-    min_ms: 5000
-    max_ms: 10000
-  schedule:
-    mode: always
-
-# Wildcard match on tool names
-- name: search-tools-slow
-  summary: All search_* tools are slow
-  target: mcp_tool
-  match:
-    tool_name_pattern: "search_*"
-  fault:
-    kind: latency
-    min_ms: 3000
-    max_ms: 8000
-  schedule:
-    mode: random
-    probability: 0.5
-```
-
-### Presets
-
-Skip manual config and use a built-in bundle:
+Don't want to write YAML? Use a preset:
 
 ```yaml
 preset: brownout
-# or combine a preset with custom scenarios:
-preset: brownout
-scenarios:
-  - name: custom-fault
-    summary: My extra fault
-    target: mcp_tool
-    fault:
-      kind: http_error
-      status_code: 503
-    schedule:
-      mode: random
-      probability: 0.2
 ```
 
 Available presets: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
@@ -163,13 +70,11 @@ Available presets: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed
 ## MCP testing
 
 ```bash
-agentbreak inspect    # discover tools from upstream MCP server
+agentbreak inspect    # discover tools from your MCP server
 agentbreak serve      # proxy both LLM and MCP traffic
 ```
 
-## Run history
-
-Track resilience over time:
+## Track resilience over time
 
 ```yaml
 # in .agentbreak/application.yaml
@@ -179,34 +84,23 @@ history:
 
 ```bash
 agentbreak serve --label "added retry logic"
-# ... run your agent ...
-agentbreak history                    # list past runs
-agentbreak history compare 1 2        # diff two runs
-```
-
-## CLI
-
-```bash
-agentbreak init                  # create .agentbreak/ config
-agentbreak serve                 # start proxy
-agentbreak validate              # check config
-agentbreak inspect               # discover MCP tools
-agentbreak verify                # run tests
-agentbreak history               # list past runs
-agentbreak history show <id>     # show details of a specific run
-agentbreak history compare <a> <b>  # compare two runs side-by-side
+agentbreak history compare 1 2    # diff two runs
 ```
 
 ## Claude Code
 
-If you use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), you can run AgentBreak as a guided skill instead of using the CLI directly:
+If you use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), AgentBreak has a guided skill that scans your codebase, generates scenarios, and walks you through results:
 
 ```bash
 npx skills add mnvsk97/agentbreak
 ```
 
-Then type `/agentbreak` in Claude Code. The skill will scan your codebase, detect your LLM provider and MCP tools, generate tailored chaos scenarios, start the proxy, and walk you through interpreting the results.
+Then type `/agentbreak` in Claude Code.
+
+## Full reference
+
+For the full list of fault kinds, schedule modes, match filters, and config options, see the [docs](docs/).
 
 ## Examples
 
-See [examples/](examples/) for sample agents and MCP servers with various auth configs.
+See [examples/](examples/) for sample agents and MCP servers you can test against.
