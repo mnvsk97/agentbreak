@@ -1226,12 +1226,21 @@ history_cli = typer.Typer(help="View past run history.")
 cli.add_typer(history_cli, name="history")
 
 
+def _history_db_path() -> str:
+    """Resolve history DB path from application.yaml, falling back to default."""
+    try:
+        cfg = load_application_config(None)
+        return cfg.history.db_path
+    except FileNotFoundError:
+        return ".agentbreak/history.db"
+
+
 @history_cli.callback(invoke_without_command=True)
 def history_list(ctx: typer.Context, limit: int = typer.Option(10, "--limit", "-n", help="Number of runs to show.")):
     """List recent runs."""
     if ctx.invoked_subcommand is not None:
         return
-    db_path = ".agentbreak/history.db"
+    db_path = _history_db_path()
     if not Path(db_path).exists():
         typer.echo("No history found. Run `agentbreak serve` with `history.enabled: true` first.")
         raise typer.Exit(1)
@@ -1257,7 +1266,7 @@ def history_list(ctx: typer.Context, limit: int = typer.Option(10, "--limit", "-
 @history_cli.command()
 def show(run_id: int = typer.Argument(..., help="Run ID to show.")):
     """Show details of a specific run."""
-    db_path = ".agentbreak/history.db"
+    db_path = _history_db_path()
     if not Path(db_path).exists():
         typer.echo("No history found.")
         raise typer.Exit(1)
@@ -1275,7 +1284,7 @@ def compare(
     run_b: int = typer.Argument(..., help="Second run ID."),
 ):
     """Compare two runs side-by-side."""
-    db_path = ".agentbreak/history.db"
+    db_path = _history_db_path()
     if not Path(db_path).exists():
         typer.echo("No history found.")
         raise typer.Exit(1)

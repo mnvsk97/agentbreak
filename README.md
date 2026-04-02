@@ -99,7 +99,7 @@ Then type `/agentbreak` in Claude Code.
 
 ## Full reference
 
-For the full list of fault kinds, schedule modes, match filters, and config options, see the [docs](docs/).
+For the full list of fault kinds, schedule modes, match filters, and config options, see the [documentation](https://mnvsk97.github.io/agentbreak).
 
 ## Examples
 

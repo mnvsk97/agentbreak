@@ -34,6 +34,7 @@ dependencies = [
 Homepage = "https://github.com/mnvsk97/agentbreak"
 Repository = "https://github.com/mnvsk97/agentbreak"
 Issues = "https://github.com/mnvsk97/agentbreak/issues"
+Documentation = "https://mnvsk97.github.io/agentbreak"
 
 [project.scripts]
 agentbreak = "agentbreak.main:cli"

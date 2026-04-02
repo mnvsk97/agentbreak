@@ -1,0 +1,57 @@
+site_name: AgentBreak
+site_description: Chaos proxy for testing LLM agents
+site_url: https://mnvsk97.github.io/agentbreak
+
+repo_url: https://github.com/mnvsk97/agentbreak
+repo_name: mnvsk97/agentbreak
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quickstart: getting-started/quickstart.md
+    - How It Works: getting-started/how-it-works.md
+  - Guides:
+    - Testing Methodology: guides/testing-methodology.md
+    - MCP Testing: guides/mcp-testing.md
+    - Run History: guides/run-history.md
+  - Reference:
+    - Scenarios: reference/scenarios.md
+    - Failure Modes: reference/failure-modes.md
+    - CLI: reference/cli.md
+  - Roadmap: roadmap.md

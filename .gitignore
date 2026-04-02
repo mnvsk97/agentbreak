@@ -20,6 +20,7 @@ uv.lock
 skills-lock.json
 
 .cortex/
+docs-site/site/
 
 # IDE skill symlinks (created by npx skills add)
 .adal/
