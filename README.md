@@ -187,12 +187,14 @@ agentbreak history compare 1 2        # diff two runs
 ## CLI
 
 ```bash
-agentbreak init       # create .agentbreak/ config
-agentbreak serve      # start proxy
-agentbreak validate   # check config
-agentbreak inspect    # discover MCP tools
-agentbreak verify     # run tests
-agentbreak history    # view past runs
+agentbreak init                  # create .agentbreak/ config
+agentbreak serve                 # start proxy
+agentbreak validate              # check config
+agentbreak inspect               # discover MCP tools
+agentbreak verify                # run tests
+agentbreak history               # list past runs
+agentbreak history show <id>     # show details of a specific run
+agentbreak history compare <a> <b>  # compare two runs side-by-side
 ```
 
 ## Claude Code
