@@ -4,7 +4,7 @@ If you use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), AgentB
 
 ## Prerequisites
 
-The skill uses the AgentBreak MCP plugin. Set it up first — see [Plugin](plugin.md).
+The skill uses the AgentBreak plugin for Claude Code. Set it up first — see [Plugin](plugin.md).
 
 ## Install
 

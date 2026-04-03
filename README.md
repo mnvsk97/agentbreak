@@ -89,7 +89,7 @@ agentbreak history compare 1 2    # diff two runs
 
 ## Claude Code
 
-AgentBreak works as an MCP plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
+AgentBreak works as a plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
 
 ```bash
 pip install agentbreak[plugin]

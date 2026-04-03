@@ -12,7 +12,7 @@ This skill orchestrates the AgentBreak MCP tools to chaos-test an agent end-to-e
 
 ## Prerequisites
 
-The AgentBreak MCP server must be configured in the user's Claude Code settings:
+The AgentBreak plugin must be configured in the user's Claude Code settings:
 
 ```json
 {

@@ -1,6 +1,6 @@
 # Claude Code Plugin
 
-AgentBreak works as an MCP plugin for Claude Code, giving Claude structured tools instead of shell commands. This means safer .env handling, automatic cleanup, and Claude can run chaos tests autonomously.
+AgentBreak works as a plugin for Claude Code, giving Claude structured tools instead of shell commands. This means safer .env handling, automatic cleanup, and Claude can run chaos tests autonomously.
 
 ## Install
 
