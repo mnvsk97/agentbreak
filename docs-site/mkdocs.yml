@@ -46,6 +46,8 @@ nav:
   - Getting Started:
     - Quickstart: getting-started/quickstart.md
     - How It Works: getting-started/how-it-works.md
+    - Claude Code Plugin: getting-started/plugin.md
+    - Claude Code Skill: getting-started/claude-code.md
   - Guides:
     - Testing Methodology: guides/testing-methodology.md
     - MCP Testing: guides/mcp-testing.md

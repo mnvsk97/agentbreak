@@ -89,13 +89,28 @@ agentbreak history compare 1 2    # diff two runs
 
 ## Claude Code
 
-If you use [Claude Code](https://docs.anthropic.com/en/docs/claude-code), AgentBreak has a guided skill that scans your codebase, generates scenarios, and walks you through results:
+AgentBreak works as an MCP plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code):
 
 ```bash
-npx skills add mnvsk97/agentbreak
+pip install agentbreak[plugin]
 ```
 
-Then type `/agentbreak` in Claude Code.
+Add to your Claude Code settings:
+
+```json
+{
+  "mcpServers": {
+    "agentbreak": {
+      "command": "agentbreak",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+Now Claude has tools to analyze your codebase, generate chaos scenarios, start the proxy, wire your agent, and auto-revert when done. Your `.env` is never left broken — `agentbreak_stop` auto-reverts.
+
+For a guided workflow, add the skill: `npx skills add mnvsk97/agentbreak`, then type `/agentbreak`.
 
 ## Full reference
 
