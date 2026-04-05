@@ -15,7 +15,8 @@ You are helping the user set up AgentBreak for chaos testing their agent.
 4. Ask: mock or proxy mode?
 5. Configure `application.yaml` and `scenarios.yaml` based on findings + mode
 6. Validate the config (+ test connection if proxy)
-7. Offer project-specific scenarios
+7. If MCP enabled, run `agentbreak inspect`
+8. Offer project-specific scenarios
 
 Ask the user to confirm before writing config.
 
@@ -158,7 +159,26 @@ If auth fails, help the user fix the config (check env var name, verify the key 
 
 Skip `--test-connection` for mock mode (no upstream to check).
 
-## Step 7: Offer project-specific scenarios
+## Step 7: Inspect MCP (if enabled)
+
+If `mcp.enabled: true` in `application.yaml`, discover the upstream tools:
+
+```bash
+agentbreak inspect
+```
+
+Expected output:
+```
+Discovered N MCP tools
+Wrote registry: .agentbreak/registry.json
+```
+
+If this fails:
+- Check that `mcp.upstream_url` is correct and the MCP server is running
+- Check auth configuration if the server requires authentication
+- In mock mode, inspect is not needed — skip this step
+
+## Step 8: Offer project-specific scenarios
 
 After validation passes, tell the user what standard scenarios are included, then ask:
 

@@ -1,6 +1,6 @@
 ---
 name: agentbreak-run-tests
-description: Run chaos tests against an OpenAI-compatible app or MCP server using AgentBreak. Uses application.yaml + scenarios.yaml, agentbreak serve, optional MCP inspect, and scorecard endpoints.
+description: Run chaos tests against an OpenAI-compatible app or MCP server using AgentBreak. Uses application.yaml + scenarios.yaml, agentbreak serve, and scorecard endpoints.
 ---
 
 # AgentBreak -- Run Chaos Tests
@@ -15,7 +15,7 @@ Agent  →  AgentBreak (localhost)  →  Real LLM / MCP server (or mock)
 
 ## Your job
 
-Walk the user through the full workflow: configure, inspect (if MCP), validate, serve, send traffic, read the scorecard. Do not skip steps. If something fails, diagnose and fix it before moving on.
+Walk the user through the full workflow: validate, serve, send traffic, read the scorecard. Do not skip steps. If something fails, diagnose and fix it before moving on.
 
 ## Step-by-step instructions
 
@@ -131,26 +131,7 @@ Available presets: `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed
 
 For the full scenario schema, use the `agentbreak-create-tests` skill.
 
-### Step 5: If MCP is enabled, run inspect
-
-This discovers the upstream MCP server's tools, resources, and prompts and writes `.agentbreak/registry.json`:
-
-```bash
-agentbreak inspect --config application.yaml
-```
-
-Expected output:
-```
-Discovered N MCP tools
-Wrote registry: .agentbreak/registry.json
-```
-
-If this fails:
-- Check that `mcp.upstream_url` is correct and the MCP server is running
-- Check auth configuration if the server requires authentication
-- Ensure the server speaks MCP over streamable HTTP
-
-### Step 6: Validate configuration
+### Step 5: Validate configuration
 
 Always validate before serving:
 
@@ -165,7 +146,7 @@ Config valid: llm_enabled=True mcp_enabled=True scenarios=3 tools=3
 
 If validation fails, it will tell you exactly what's wrong (missing fields, invalid fault kinds, unsupported targets, etc.). Fix the issue and re-validate.
 
-### Step 7: Start the chaos proxy
+### Step 6: Start the chaos proxy
 
 ```bash
 agentbreak serve -v
@@ -179,18 +160,18 @@ INFO [agentbreak] llm=proxy mcp=on scenarios=3
 
 Leave this running in its own terminal.
 
-### Step 8: Wire the agent to AgentBreak
+### Step 7: Wire the agent to AgentBreak
 
 The agent must send its LLM/MCP traffic through AgentBreak instead of the real API. **Do not just tell the user to do this — actually do the wiring.**
 
-#### 8a. Find the LLM connection config
+#### 7a. Find the LLM connection config
 
 Search the codebase for how the agent connects to its LLM:
 - `.env` files: look for `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, or custom vars like `TFY_GATEWAY_URL`, `LLM_BASE_URL`
 - Code: `base_url=` in SDK constructors, `ChatOpenAI(base_url=...)`, `Anthropic(base_url=...)`
 - Config files: YAML/JSON with endpoint URLs
 
-#### 8b. Back up and modify `.env`
+#### 7b. Back up and modify `.env`
 
 ```bash
 cp .env .env.backup
@@ -211,7 +192,7 @@ Edit `.env` to replace the LLM URL with the AgentBreak proxy:
 
 **IMPORTANT:** Many tools (`langgraph dev`, `dotenv`, subprocess launchers) ignore inline env var overrides and only read `.env` files. Always edit the actual `.env` file.
 
-#### 8c. Start the agent
+#### 7c. Start the agent
 
 Start the agent using its normal run command:
 
@@ -228,7 +209,7 @@ python -m my_agent &
 
 Wait for it to be ready (check its health endpoint or logs).
 
-#### 8d. Trigger runs through the agent
+#### 7d. Trigger runs through the agent
 
 Send real requests so LLM/MCP traffic flows through AgentBreak. Run **3-5 invocations** with different prompts to avoid loop detection.
 
@@ -254,7 +235,7 @@ for i in {1..10}; do
 done
 ```
 
-#### 8e. Verify traffic and restore config
+#### 7e. Verify traffic and restore config
 
 Check that requests flowed through:
 ```bash
@@ -270,7 +251,7 @@ cp .env.backup .env && rm .env.backup
 kill %2   # or pkill -f "langgraph dev" etc.
 ```
 
-### Step 9: Collect results & produce report
+### Step 8: Collect results & produce report
 
 Fetch all scorecard data:
 
