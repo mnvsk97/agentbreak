@@ -173,14 +173,6 @@ class ScenarioStat:
 
 
 @dataclass
-class ModelStat:
-    requests: int = 0
-    faults: int = 0
-    recovered: int = 0
-    latency_samples: list[float] = field(default_factory=list)
-
-
-@dataclass
 class LLMStats:
     total_requests: int = 0
     injected_faults: int = 0
@@ -194,11 +186,9 @@ class LLMStats:
     unrecovered_faults: int = 0
     _pending_fault: bool = field(default=False, repr=False)
     _pending_scenario: str | None = field(default=None, repr=False)
-    _pending_model: str | None = field(default=None, repr=False)
     seen_fingerprints: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=20))
     scenario_stats: dict[str, ScenarioStat] = field(default_factory=dict)
-    model_stats: dict[str, ModelStat] = field(default_factory=dict)
     latency_samples: list[float] = field(default_factory=list)
 
 
@@ -242,9 +232,6 @@ class LLMRuntime:
             return JSONResponse(status_code=400, content=error_fn(400, message_override="Malformed JSON request body."))
 
         model = payload.get("model") or "unknown"
-        ms = self.stats.model_stats.setdefault(model, ModelStat())
-        ms.requests += 1
-
         is_streaming = payload.get("stream") is True
 
         scenario = choose_matching_scenario(
@@ -266,27 +253,21 @@ class LLMRuntime:
                 self.stats.upstream_failures += 1
                 self.stats._pending_fault = True
                 self.stats._pending_scenario = scenario.name
-                self.stats._pending_model = model
-                ms.faults += 1
                 ss.unrecovered += 1
                 logger.info("injecting http_error %d via %s", scenario.fault.status_code or 500, scenario.name)
-                self._record_latency(t0, model)
+                self._record_latency(t0)
                 return JSONResponse(status_code=scenario.fault.status_code or 500, content=error_fn(scenario.fault.status_code or 500))
         else:
             if self.stats._pending_fault:
                 self.stats.fault_recoveries += 1
                 self.stats._pending_fault = False
-                # Mark recovery on the scenario and model that caused the fault
+                # Mark recovery on the scenario that caused the fault
                 prev_scenario = self.stats._pending_scenario
-                prev_model = self.stats._pending_model
                 if prev_scenario and prev_scenario in self.stats.scenario_stats:
                     ps = self.stats.scenario_stats[prev_scenario]
                     ps.recovered += 1
                     ps.unrecovered = max(0, ps.unrecovered - 1)
-                if prev_model and prev_model in self.stats.model_stats:
-                    self.stats.model_stats[prev_model].recovered += 1
                 self.stats._pending_scenario = None
-                self.stats._pending_model = None
 
         upstream_path = "/v1/messages" if api_format == "anthropic" else "/v1/chat/completions"
 
@@ -326,13 +307,12 @@ class LLMRuntime:
             response_body = mutate_fn(response_body, scenario)
             self.stats.response_mutations += 1
             self.stats.injected_faults += 1
-            ms.faults += 1
             self.stats.upstream_successes += 1
-            self._record_latency(t0, model)
+            self._record_latency(t0)
             return Response(content=response_body, status_code=200, media_type="application/json")
 
         self.stats.upstream_successes += 1
-        self._record_latency(t0, model)
+        self._record_latency(t0)
         if self.mode == "proxy":
             return Response(
                 content=response_body,
@@ -446,18 +426,6 @@ class LLMRuntime:
                 "status": status,
             })
 
-        # Per-model breakdown
-        models = {}
-        for model_name, ms in self.stats.model_stats.items():
-            entry: dict[str, Any] = {
-                "requests": ms.requests,
-                "faults": ms.faults,
-                "recovered": ms.recovered,
-            }
-            if ms.latency_samples:
-                entry["avg_latency_ms"] = round(statistics.mean(ms.latency_samples))
-            models[model_name] = entry
-
         # Latency stats
         latency: dict[str, Any] | None = None
         if self.stats.latency_samples:
@@ -494,8 +462,6 @@ class LLMRuntime:
             },
             # Per-scenario
             "scenarios": scenarios,
-            # Per-model
-            "models": models,
             # Latency
             "latency": latency,
         }
@@ -503,12 +469,9 @@ class LLMRuntime:
     def current_requests(self) -> dict[str, Any]:
         return {"recent_requests": list(self.stats.recent_requests)}
 
-    def _record_latency(self, t0: float, model: str) -> None:
+    def _record_latency(self, t0: float) -> None:
         elapsed_ms = (time.monotonic() - t0) * 1000
         self.stats.latency_samples.append(elapsed_ms)
-        ms = self.stats.model_stats.get(model)
-        if ms:
-            ms.latency_samples.append(elapsed_ms)
 
     def _record_request(self, body: bytes) -> None:
         self.stats.total_requests += 1
@@ -1266,56 +1229,103 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, handle_signal)
 
 
+_SCENARIO_DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    # kind -> (what_happened, fix_suggestion)
+    "http_error": (
+        "returned HTTP errors (e.g. 429, 500, 503) and the agent didn't fully recover",
+        "Add retry with exponential backoff and a fallback response when retries are exhausted",
+    ),
+    "latency": (
+        "injected slow responses and the agent timed out or hung",
+        "Set request timeouts and add a fallback path for when calls take too long",
+    ),
+    "invalid_json": (
+        "returned malformed JSON and the agent crashed or passed garbage downstream",
+        "Wrap JSON parsing in try/except — retry the call or return a safe default",
+    ),
+    "empty_response": (
+        "returned an empty body and the agent failed to handle it",
+        "Check for empty/null responses before processing and retry or surface an error",
+    ),
+    "schema_violation": (
+        "returned valid JSON with a broken structure (e.g. missing tool_calls) and the agent didn't catch it",
+        "Validate response structure before using fields like tool_calls or content",
+    ),
+    "wrong_content": (
+        "returned unrelated content and the agent blindly used it",
+        "Validate that the response is relevant before passing it downstream",
+    ),
+    "large_response": (
+        "returned an oversized response and the agent struggled to parse it",
+        "Set a max response size limit or truncate before parsing",
+    ),
+    "timeout": (
+        "timed out on tool calls and the agent didn't recover",
+        "Add timeout handling with a circuit breaker for repeated failures",
+    ),
+}
+
+
+def _describe_scenario(s: dict[str, Any]) -> tuple[str, str]:
+    """Return (what went wrong, how to fix) for a scenario."""
+    kind = s.get("kind", "")
+    default = ("caused failures the agent didn't handle", "Add error handling for this failure mode")
+    return _SCENARIO_DESCRIPTIONS.get(kind, default)
+
+
 def _format_summary_lines(label: str, data: dict[str, Any]) -> list[str]:
-    """Format a compact, readable summary for one runtime."""
-    lines = [f"{label}:"]
+    """Format a human-readable summary for one runtime."""
+    lines = []
     outcome = data["run_outcome"]
     score = data["resilience_score"]
-    lines.append(f"  Outcome: {outcome}  |  Score: {score}/100")
-
-    # Score breakdown
-    bd = data.get("score_breakdown", {})
-    parts = []
-    for key in ("fault_penalty", "failure_penalty", "duplicate_penalty", "loop_penalty", "recovery_bonus"):
-        val = bd.get(key, 0)
-        if val != 0:
-            parts.append(f"{key.replace('_', ' ')}: {val:+d}")
-    if parts:
-        lines.append(f"  Breakdown: {', '.join(parts)}")
-
-    # Recovery rate (LLM only)
+    total = data["requests_seen"]
+    faults = data["injected_faults"]
     rr = data.get("recovery_rate")
-    if rr is not None:
-        lines.append(f"  Recovery rate: {rr:.0%}")
 
-    # Traffic
-    lines.append(f"  Requests: {data['requests_seen']}  |  Faults: {data['injected_faults']}  |  Latency injections: {data['latency_injections']}")
+    # Headline
+    if outcome == "PASS":
+        lines.append(f"{label}: PASSED — Score {score}/100")
+        lines.append(f"  Sent {total} requests with {faults} injected faults. Agent handled all of them.")
+    elif outcome == "DEGRADED":
+        lines.append(f"{label}: DEGRADED — Score {score}/100")
+        rr_str = f" ({rr:.0%} recovery rate)" if rr is not None else ""
+        lines.append(f"  Sent {total} requests, injected {faults} faults. Agent recovered from some but not all{rr_str}.")
+    else:
+        lines.append(f"{label}: FAILED — Score {score}/100")
+        lines.append(f"  Sent {total} requests, injected {faults} faults. Agent could not recover.")
 
-    # Per-scenario (show triggered only, sorted by triggered desc)
-    scenarios = [s for s in data.get("scenarios", []) if s.get("triggered", 0) > 0]
-    if scenarios:
-        scenarios.sort(key=lambda s: s["triggered"], reverse=True)
-        lines.append("  Scenarios:")
-        for s in scenarios:
-            status = s.get("status", "")
-            status_icon = {"survived": "+", "partial": "~", "failed": "-"}.get(status, " ")
-            extra = ""
-            if "recovered" in s:
-                extra = f"  recovered={s['recovered']}"
-            lines.append(f"    [{status_icon}] {s['name']}: triggered={s['triggered']}{extra}")
+    # Scenarios — natural language
+    failed = [s for s in data.get("scenarios", []) if s.get("status") == "failed"]
+    partial = [s for s in data.get("scenarios", []) if s.get("status") == "partial"]
+    survived = [s for s in data.get("scenarios", []) if s.get("status") == "survived"]
 
-    # Per-model (LLM only)
-    models = data.get("models", {})
-    if models:
-        lines.append("  Models:")
-        for model_name, ms in models.items():
-            latency_str = f"  avg={ms['avg_latency_ms']}ms" if "avg_latency_ms" in ms else ""
-            lines.append(f"    {model_name}: reqs={ms['requests']} faults={ms['faults']} recovered={ms['recovered']}{latency_str}")
+    if survived:
+        names = ", ".join(s["name"] for s in survived)
+        lines.append(f"")
+        lines.append(f"  Survived:")
+        lines.append(f"    {names}")
 
-    # Latency
+    if partial:
+        lines.append(f"")
+        lines.append(f"  Partially recovered:")
+        for s in partial:
+            desc, fix = _describe_scenario(s)
+            lines.append(f"    {s['name']} — {desc}")
+            lines.append(f"      Fix: {fix}")
+
+    if failed:
+        lines.append(f"")
+        lines.append(f"  Failed:")
+        for s in failed:
+            desc, fix = _describe_scenario(s)
+            lines.append(f"    {s['name']} — {desc}")
+            lines.append(f"      Fix: {fix}")
+
+    # Latency (only if noteworthy)
     lat = data.get("latency")
-    if lat:
-        lines.append(f"  Latency: avg={lat['avg_ms']}ms  p95={lat['p95_ms']}ms  max={lat['max_ms']}ms")
+    if lat and lat.get("p95_ms", 0) > 1000:
+        lines.append(f"")
+        lines.append(f"  Latency: avg {lat['avg_ms']}ms, p95 {lat['p95_ms']}ms, max {lat['max_ms']}ms")
 
     return lines
 
