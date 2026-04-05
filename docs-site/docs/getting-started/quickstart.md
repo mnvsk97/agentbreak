@@ -16,8 +16,8 @@ agentbreak init
 
 This creates `.agentbreak/` with two config files:
 
-- **`application.yaml`** — what to proxy (LLM mode, MCP upstream, port)
-- **`scenarios.yaml`** — what faults to inject
+- **`application.yaml`** — what to proxy (LLM/MCP mode, upstream URLs, port)
+- **`scenarios.yaml`** — what faults to inject (includes a standard preset with baseline scenarios)
 
 ## 3. Start the proxy
 
@@ -62,7 +62,9 @@ You'll get a JSON response with:
 
 ## Mock vs proxy mode
 
-By default, AgentBreak runs in **mock mode** — no API key needed, it returns synthetic responses. To test against the real API:
+By default, AgentBreak runs in **mock mode** — no API keys needed, it returns synthetic responses. Both LLM and MCP support mock mode.
+
+To test against real APIs, switch to **proxy mode**:
 
 ```yaml
 # .agentbreak/application.yaml
@@ -72,7 +74,18 @@ llm:
   upstream_url: https://api.openai.com    # or https://api.anthropic.com
   auth:
     type: bearer
-    token_env: OPENAI_API_KEY             # or ANTHROPIC_API_KEY
+    env: OPENAI_API_KEY                   # or ANTHROPIC_API_KEY
+
+mcp:
+  enabled: true
+  mode: proxy
+  upstream_url: http://localhost:8001/mcp
+```
+
+Verify your credentials before running tests:
+
+```bash
+agentbreak validate --test-connection
 ```
 
 ## Next steps

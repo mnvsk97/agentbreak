@@ -4,17 +4,24 @@ AgentBreak works as a plugin for Claude Code, giving Claude structured commands 
 
 ## Install
 
+1. Install the package:
+
 ```bash
 pip install agentbreak
 ```
 
-## Configure
-
-In Claude Code:
+2. Add the plugin in Claude Code:
 
 ```
 /plugin marketplace add mnvsk97/agentbreak
 /plugin install agentbreak@mnvsk97-agentbreak
+/reload-plugins
+```
+
+To update after a new release:
+
+```
+/plugin marketplace add mnvsk97/agentbreak
 /reload-plugins
 ```
 
@@ -23,16 +30,28 @@ In Claude Code:
 | Command | What it does |
 |---------|-------------|
 | `/agentbreak:init` | Initialize AgentBreak, analyze your agent codebase |
-| `/agentbreak:create-tests` | Generate tailored chaos scenarios |
+| `/agentbreak:create-tests` | Generate project-specific chaos scenarios |
 | `/agentbreak:run-tests` | Run tests and produce a resilience report |
 
 ### `/agentbreak:init`
 
-Sets up `.agentbreak/` config and scans your codebase for provider, framework, MCP tools, and error handling patterns. Run this first.
+Full setup flow:
+
+1. Checks AgentBreak is installed
+2. Runs `agentbreak init` to create `.agentbreak/`
+3. Analyzes your codebase (provider, framework, MCP tools, error handling)
+4. Asks: **mock or proxy mode?**
+    - **Mock** — no API keys needed, synthetic responses
+    - **Proxy** — real API traffic, requires valid keys
+5. Writes `application.yaml` and `scenarios.yaml` (with standard preset)
+6. Validates config (+ `--test-connection` if proxy mode)
+7. Offers to generate project-specific scenarios
 
 ### `/agentbreak:create-tests`
 
-Generate `scenarios.yaml` entries based on the analysis from init. Claude understands the full scenario schema (8 fault kinds, 3 schedule modes, match filters) and writes scenarios targeting your agent's specific failure modes.
+Generates project-specific scenarios on top of the standard preset. Analyzes your codebase to find specific MCP tools, models, and integrations, then writes targeted fault scenarios. Can be run anytime to add more scenarios.
+
+Standard baseline scenarios are always included via the preset — this command focuses on what's unique to your agent.
 
 ### `/agentbreak:run-tests`
 

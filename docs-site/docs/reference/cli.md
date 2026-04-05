@@ -4,7 +4,7 @@ All commands work from your project root (where `.agentbreak/` lives).
 
 ## `agentbreak init`
 
-Create `.agentbreak/` directory with default `application.yaml` and `scenarios.yaml`.
+Create `.agentbreak/` directory with default `application.yaml` and `scenarios.yaml`. Auto-detects your provider (OpenAI/Anthropic), framework, and MCP usage. Generates `scenarios.yaml` with a standard preset based on what's enabled.
 
 ```bash
 agentbreak init
@@ -26,7 +26,16 @@ Check your config files for errors.
 
 ```bash
 agentbreak validate
+agentbreak validate --test-connection   # also test upstream auth (proxy mode)
 ```
+
+The `--test-connection` flag makes a lightweight request to each proxy-mode upstream to verify connectivity and auth. Results:
+
+- **OK** — upstream reachable, auth works
+- **AUTH FAILED (401)** — bad API key or token
+- **FORBIDDEN (403)** — key valid but insufficient permissions
+- **CONNECTION FAILED** — wrong URL or upstream is down
+- **TIMEOUT** — upstream too slow to respond
 
 ## `agentbreak inspect`
 

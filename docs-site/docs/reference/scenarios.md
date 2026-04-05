@@ -86,31 +86,57 @@ scenarios:
 
 ## Presets
 
-Skip manual config with built-in bundles:
+Use presets for baseline coverage out of the box:
 
 ```yaml
-preset: brownout
+version: 1
+preset: standard
 ```
 
-Combine a preset with custom scenarios:
+Combine a preset with project-specific scenarios:
 
 ```yaml
-preset: brownout
+version: 1
+preset: standard-all
 scenarios:
-  - name: custom-fault
-    summary: My extra fault
+  - name: search-tool-timeout
+    summary: search_docs times out
     target: mcp_tool
+    match:
+      tool_name: search_docs
     fault:
-      kind: http_error
-      status_code: 503
+      kind: timeout
+      min_ms: 5000
+      max_ms: 10000
     schedule:
       mode: random
       probability: 0.2
 ```
 
-| Preset | What it does |
-|--------|-------------|
-| `brownout` | Random LLM latency + rate limits |
-| `mcp-slow-tools` | 90% of MCP tool calls are slow |
-| `mcp-tool-failures` | 30% of MCP tool calls return 503 |
-| `mcp-mixed-transient` | Light MCP latency + errors |
+Use multiple presets:
+
+```yaml
+version: 1
+presets:
+  - standard
+  - mcp-slow-tools
+```
+
+### Standard presets
+
+These provide baseline coverage. `agentbreak init` uses these by default.
+
+| Preset | Target | Scenarios |
+|--------|--------|-----------|
+| `standard` | LLM | 6 scenarios: rate limit (429), server error (500), latency (3-8s), invalid JSON, empty response, schema violation |
+| `standard-mcp` | MCP | 7 scenarios: 503 unavailable, timeout (5-15s), latency (3-8s), empty response, invalid JSON, schema violation, wrong content |
+| `standard-all` | Both | All 13 baseline scenarios (standard + standard-mcp) |
+
+### Specialty presets
+
+| Preset | Target | What it does |
+|--------|--------|-------------|
+| `brownout` | LLM | Random LLM latency + rate limits |
+| `mcp-slow-tools` | MCP | 90% of MCP tool calls are slow |
+| `mcp-tool-failures` | MCP | 30% of MCP tool calls return 503 |
+| `mcp-mixed-transient` | MCP | Light MCP latency + errors |
