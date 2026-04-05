@@ -103,7 +103,28 @@ Then in Claude Code:
 /reload-plugins
 ```
 
-Now use the three commands — `/agentbreak:init`, `/agentbreak:create-tests`, and `/agentbreak:run-tests` — and Claude walks you through codebase analysis, scenario generation, and resilience reporting.
+Three commands:
+
+| Command | What it does |
+|---------|-------------|
+| `/agentbreak:init` | Analyze codebase, configure mock/proxy mode |
+| `/agentbreak:create-tests` | Generate project-specific chaos scenarios |
+| `/agentbreak:run-tests` | Run tests, produce resilience report with fixes |
+
+**Update to latest:**
+
+```
+/plugin marketplace add mnvsk97/agentbreak
+/plugin install agentbreak@mnvsk97-agentbreak
+/reload-plugins
+```
+
+**Uninstall:**
+
+```
+/plugin uninstall agentbreak@mnvsk97-agentbreak
+/reload-plugins
+```
 
 ## Full reference
 
