@@ -1458,7 +1458,25 @@ def inspect(
     if not application.mcp.enabled:
         raise typer.BadParameter("mcp.enabled must be true to run inspect")
 
-    registry = asyncio.run(inspect_mcp_server(application.mcp))
+    try:
+        registry = asyncio.run(inspect_mcp_server(application.mcp))
+    except httpx.ConnectError:
+        raise typer.BadParameter(
+            f"Connection refused: could not reach {application.mcp.upstream_url}\n"
+            "Is the MCP server running? Check the URL and try again."
+        )
+    except httpx.HTTPStatusError as exc:
+        raise typer.BadParameter(
+            f"HTTP {exc.response.status_code} from {application.mcp.upstream_url}\n"
+            f"Check your auth config and try again."
+        )
+    except httpx.TimeoutException:
+        raise typer.BadParameter(
+            f"Timeout connecting to {application.mcp.upstream_url}\n"
+            "The server did not respond within 30 seconds."
+        )
+    except Exception as exc:
+        raise typer.BadParameter(f"MCP inspect failed: {exc}")
     output_path = save_registry(registry, registry_path)
     typer.echo(f"Discovered {len(registry.tools)} MCP tools")
     typer.echo(f"Wrote registry: {output_path}")
@@ -1579,6 +1597,11 @@ def validate(
         f"scenarios={len(state.scenarios.scenarios)} "
         f"tools={len(state.registry.tools)}"
     )
+    if state.application.mcp.enabled and len(state.registry.tools) == 0:
+        typer.echo(
+            "Warning: MCP is enabled but no tools found in registry. "
+            "Run 'agentbreak inspect' first, or set mcp.enabled: false."
+        )
     if test_connection:
         results = _check_upstream_auth(state.application)
         if results:

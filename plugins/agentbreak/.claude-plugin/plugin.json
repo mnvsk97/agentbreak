@@ -1,7 +1,7 @@
 {
   "name": "agentbreak",
   "version": "0.4.1",
-  "description": "Chaos proxy that injects latency, errors, and malformed responses to test agent resilience.",
+  "description": "Chaos-test LLM agents for resilience. Injects latency, errors, timeouts, and malformed responses between your agent and its API to find failure modes before production does.",
   "author": {
     "name": "mnvsk97"
   }

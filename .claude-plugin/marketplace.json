@@ -4,13 +4,13 @@
     "name": "mnvsk97"
   },
   "metadata": {
-    "description": "Chaos-test LLM agents by injecting faults between your agent and the real API.",
+    "description": "Chaos-test LLM agents for resilience, reliability, and fault tolerance by injecting failures between your agent and the real API.",
     "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "agentbreak",
-      "description": "Chaos proxy that injects latency, errors, and malformed responses to test agent resilience.",
+      "description": "Chaos-test LLM agents for resilience. Injects latency, errors, timeouts, and malformed responses to find failure modes before production does.",
       "version": "0.4.0",
       "author": {
         "name": "mnvsk97"
