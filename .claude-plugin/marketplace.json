@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Chaos-test LLM agents for resilience, reliability, and fault tolerance by injecting failures between your agent and the real API.",
-    "version": "0.4.0"
+    "version": "0.4.4"
   },
   "plugins": [
     {
       "name": "agentbreak",
       "description": "Chaos-test LLM agents for resilience. Injects latency, errors, timeouts, and malformed responses to find failure modes before production does.",
-      "version": "0.4.0",
+      "version": "0.4.4",
       "author": {
         "name": "mnvsk97"
       },
