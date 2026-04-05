@@ -338,18 +338,14 @@ agentbreak history compare <old_id> <new_id>
 >
 > ### Next Steps
 >
-> - If issues found: "Want me to apply these fixes now?"
-> - If score improved: "Score improved [old] → [new] after [what changed]."
 > - If score 80+: "Agent is resilient. Consider adding to CI."
-> - If still low: "Re-run after fixes to verify."
+> - If issues found: "See the fixes above. Re-run `/agentbreak:run-tests` after applying them to verify."
 
 ---
 
-**IMPORTANT:** This report must be detailed enough that:
-1. A **user** can understand exactly what broke and how to fix it
-2. **Claude Code** can pick up where this skill left off and apply the fixes directly without re-reading the codebase
-
-If the user asks to apply fixes, edit the code files directly using the information from this report.
+**IMPORTANT:**
+- This report must be detailed enough that the user can understand exactly what broke and how to fix it.
+- **Do NOT offer to apply fixes.** Just present the findings and suggested fixes. The user decides what to do next.
 
 ## All available endpoints
 

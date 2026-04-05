@@ -173,10 +173,15 @@ Discovered N MCP tools
 Wrote registry: .agentbreak/registry.json
 ```
 
-If this fails:
-- Check that `mcp.upstream_url` is correct and the MCP server is running
-- Check auth configuration if the server requires authentication
-- In mock mode, inspect is not needed — skip this step
+If this fails (e.g. 401 auth error, connection refused), **do NOT silently skip it**. Stop and ask the user:
+
+> "MCP inspect failed: [error details]. Would you like to:
+> 1. **Fix it** — check the token/URL and retry
+> 2. **Skip MCP** — disable MCP testing and continue with LLM-only scenarios"
+
+If the user chooses to skip, set `mcp.enabled: false` in `application.yaml` and re-validate.
+
+In mock mode, inspect is not needed — skip this step.
 
 ## Step 8: Offer project-specific scenarios
 
