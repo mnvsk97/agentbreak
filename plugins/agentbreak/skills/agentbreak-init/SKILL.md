@@ -19,7 +19,7 @@ You are helping the user set up AgentBreak for chaos testing their agent.
 
 Ask the user to confirm before writing config.
 
-## Step 1: Install check
+## Step 1: Install & update check
 
 ```bash
 agentbreak --help
@@ -30,6 +30,25 @@ If not found, install it:
 ```bash
 pip install agentbreak
 ```
+
+After confirming it's installed, check for updates:
+
+```bash
+pip index versions agentbreak 2>/dev/null | head -1
+agentbreak --version
+```
+
+Compare the installed version with the latest on PyPI. If a newer version is available, tell the user:
+
+> "AgentBreak **X.Y.Z** is installed, but **A.B.C** is available. Run `pip install --upgrade agentbreak` to update."
+
+If `pip index` is not available (older pip), use this fallback:
+
+```bash
+pip install agentbreak --dry-run 2>&1 | grep -i "already satisfied\|would install"
+```
+
+Don't block on this — if the check fails, just skip it and continue.
 
 ## Step 2: Init
 
