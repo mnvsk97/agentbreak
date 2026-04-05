@@ -92,17 +92,33 @@ class AuthConfig(BaseModel):
         return self._cached_token
 
 
+def _expand_env_vars(value: str) -> str:
+    """Expand ${VAR} and $VAR references in a string using environment variables."""
+    return os.path.expandvars(value) if value else value
+
+
 class LLMConfig(BaseModel):
     enabled: bool = True
     upstream_url: str = ""
     mode: Literal["proxy", "mock"] = "mock"
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
+    @model_validator(mode="after")
+    def _expand_upstream_url(self) -> "LLMConfig":
+        self.upstream_url = _expand_env_vars(self.upstream_url)
+        return self
+
 
 class MCPConfig(BaseModel):
     enabled: bool = False
     upstream_url: str = ""
+    mode: Literal["proxy", "mock"] = "proxy"
     auth: AuthConfig = Field(default_factory=AuthConfig)
+
+    @model_validator(mode="after")
+    def _expand_upstream_url(self) -> "MCPConfig":
+        self.upstream_url = _expand_env_vars(self.upstream_url)
+        return self
 
 
 class ServeConfig(BaseModel):
@@ -125,6 +141,8 @@ class ApplicationConfig(BaseModel):
     def validate_modes(self) -> "ApplicationConfig":
         if self.llm.enabled and self.llm.mode == "proxy" and not self.llm.upstream_url:
             raise ValueError("llm.upstream_url is required when llm.mode is 'proxy'")
+        if self.mcp.enabled and self.mcp.mode == "proxy" and not self.mcp.upstream_url:
+            raise ValueError("mcp.upstream_url is required when mcp.mode is 'proxy'")
         return self
 
 

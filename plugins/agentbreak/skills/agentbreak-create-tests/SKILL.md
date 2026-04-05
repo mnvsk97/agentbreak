@@ -9,9 +9,11 @@ You are helping the user create `scenarios.yaml` for AgentBreak chaos testing. E
 
 ## Your job
 
+Standard baseline scenarios are already included via a preset (`standard`, `standard-mcp`, or `standard-all`). Your job is to generate **project-specific** scenarios that target the user's specific tools, models, and failure modes.
+
 1. Understand what the user's agent does: what LLM provider, what MCP tools, what breaks in production
-2. Write scenarios targeting those specific failure modes
-3. Write or update `scenarios.yaml`
+2. Write scenarios targeting those specific failure modes (use `match` to target specific tools/models)
+3. Append scenarios to `scenarios.yaml` below the existing preset — do NOT remove or replace the preset
 4. Validate it: `agentbreak validate --config application.yaml --scenarios scenarios.yaml`
 5. Explain what each scenario tests and why
 
@@ -144,6 +146,9 @@ preset: brownout
 
 | Preset | Target | What it expands to |
 |--------|--------|--------------------|
+| `standard` | llm_chat | 6 baseline LLM faults: rate limit (429), server error (500), latency (3-8s), invalid JSON, empty response, schema violation |
+| `standard-mcp` | mcp_tool | 7 baseline MCP faults: 503 unavailable, timeout (5-15s), latency (3-8s), empty response, invalid JSON, schema violation, wrong content |
+| `standard-all` | both | All 13 baseline scenarios (standard + standard-mcp) |
 | `brownout` | llm_chat | `brownout-latency`: latency 5-15s at p=0.2 + `brownout-errors`: HTTP 429 at p=0.3 |
 | `mcp-slow-tools` | mcp_tool | `mcp-slow-tools`: latency 5-15s at p=0.9 |
 | `mcp-tool-failures` | mcp_tool | `mcp-tool-failures`: HTTP 503 at p=0.3 |

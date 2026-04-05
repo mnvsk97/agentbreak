@@ -9,6 +9,114 @@ from pydantic import BaseModel, Field, model_validator
 
 
 PRESET_SCENARIOS: dict[str, list[dict[str, Any]]] = {
+    "standard": [
+        {
+            "name": "std-llm-rate-limit",
+            "summary": "LLM returns 429 rate limit",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "http_error", "status_code": 429},
+            "schedule": {"mode": "random", "probability": 0.2},
+        },
+        {
+            "name": "std-llm-server-error",
+            "summary": "LLM returns 500 server error",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "http_error", "status_code": 500},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+        {
+            "name": "std-llm-latency",
+            "summary": "LLM responds slowly (3-8s)",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "latency", "min_ms": 3000, "max_ms": 8000},
+            "schedule": {"mode": "random", "probability": 0.2},
+        },
+        {
+            "name": "std-llm-invalid-json",
+            "summary": "LLM returns unparseable JSON",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "invalid_json"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+        {
+            "name": "std-llm-empty-response",
+            "summary": "LLM returns empty body",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "empty_response"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+        {
+            "name": "std-llm-schema-violation",
+            "summary": "LLM returns structurally invalid response",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "schema_violation"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+    ],
+    "standard-mcp": [
+        {
+            "name": "std-mcp-unavailable",
+            "summary": "MCP server returns 503 service unavailable",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "http_error", "status_code": 503},
+            "schedule": {"mode": "random", "probability": 0.2},
+        },
+        {
+            "name": "std-mcp-timeout",
+            "summary": "MCP tool call times out (5-15s)",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "timeout", "min_ms": 5000, "max_ms": 15000},
+            "schedule": {"mode": "random", "probability": 0.2},
+        },
+        {
+            "name": "std-mcp-latency",
+            "summary": "MCP tool responds slowly (3-8s)",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "latency", "min_ms": 3000, "max_ms": 8000},
+            "schedule": {"mode": "random", "probability": 0.2},
+        },
+        {
+            "name": "std-mcp-empty-response",
+            "summary": "MCP tool returns empty body",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "empty_response"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+        {
+            "name": "std-mcp-invalid-json",
+            "summary": "MCP tool returns unparseable JSON",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "invalid_json"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+        {
+            "name": "std-mcp-schema-violation",
+            "summary": "MCP tool returns structurally invalid response",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "schema_violation"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+        {
+            "name": "std-mcp-wrong-content",
+            "summary": "MCP tool returns garbage content",
+            "target": "mcp_tool",
+            "match": {},
+            "fault": {"kind": "wrong_content"},
+            "schedule": {"mode": "random", "probability": 0.1},
+        },
+    ],
     "brownout": [
         {
             "name": "brownout-latency",
@@ -66,6 +174,7 @@ PRESET_SCENARIOS: dict[str, list[dict[str, Any]]] = {
         },
     ],
 }
+PRESET_SCENARIOS["standard-all"] = [*PRESET_SCENARIOS["standard"], *PRESET_SCENARIOS["standard-mcp"]]
 
 Target = Literal[
     "llm_chat",

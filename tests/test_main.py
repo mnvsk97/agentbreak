@@ -78,6 +78,62 @@ def test_init_creates_agentbreak_directory(tmp_path: Path, monkeypatch) -> None:
     assert "Created" in result.stdout
 
 
+def test_init_detects_mcp_from_requirements(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "requirements.txt").write_text("langchain-mcp-adapters\nlangchain-openai\n", encoding="utf-8")
+    result = runner.invoke(main.cli, ["init"])
+    assert result.exit_code == 0
+    app_yaml = (tmp_path / ".agentbreak" / "application.yaml").read_text(encoding="utf-8")
+    assert "enabled: true" in app_yaml
+    # MCP section should be enabled
+    lines = app_yaml.splitlines()
+    mcp_idx = next(i for i, l in enumerate(lines) if l.strip() == "mcp:")
+    assert "enabled: true" in lines[mcp_idx + 1]
+    scenarios_yaml = (tmp_path / ".agentbreak" / "scenarios.yaml").read_text(encoding="utf-8")
+    assert "preset: standard-all" in scenarios_yaml
+
+
+def test_init_detects_mcp_from_source(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "agent.py").write_text(
+        "from langchain_mcp_adapters.client import MultiServerMCPClient\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(main.cli, ["init"])
+    assert result.exit_code == 0
+    app_yaml = (tmp_path / ".agentbreak" / "application.yaml").read_text(encoding="utf-8")
+    lines = app_yaml.splitlines()
+    mcp_idx = next(i for i, l in enumerate(lines) if l.strip() == "mcp:")
+    assert "enabled: true" in lines[mcp_idx + 1]
+
+
+def test_init_detects_mcp_url_from_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "requirements.txt").write_text("langchain-mcp-adapters\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        'MCP_GATEWAY_URL=https://example.com/mcp\nMCP_GATEWAY_API_KEY=secret\n',
+        encoding="utf-8",
+    )
+    result = runner.invoke(main.cli, ["init"])
+    assert result.exit_code == 0
+    app_yaml = (tmp_path / ".agentbreak" / "application.yaml").read_text(encoding="utf-8")
+    assert "https://example.com/mcp" in app_yaml
+    assert "MCP_GATEWAY_API_KEY" in app_yaml
+
+
+def test_init_no_mcp_when_not_detected(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "requirements.txt").write_text("langchain-openai\n", encoding="utf-8")
+    result = runner.invoke(main.cli, ["init"])
+    assert result.exit_code == 0
+    app_yaml = (tmp_path / ".agentbreak" / "application.yaml").read_text(encoding="utf-8")
+    lines = app_yaml.splitlines()
+    mcp_idx = next(i for i, l in enumerate(lines) if l.strip() == "mcp:")
+    assert "enabled: false" in lines[mcp_idx + 1]
+    scenarios_yaml = (tmp_path / ".agentbreak" / "scenarios.yaml").read_text(encoding="utf-8")
+    assert "preset: standard\n" in scenarios_yaml
+
+
 def test_init_does_not_overwrite_existing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     agentbreak_dir = tmp_path / ".agentbreak"
@@ -179,7 +235,7 @@ def test_mcp_only_mock_config_is_valid() -> None:
     config = main.ApplicationConfig.model_validate(
         {
             "llm": {"enabled": False},
-            "mcp": {"enabled": True},
+            "mcp": {"enabled": True, "mode": "mock"},
             "serve": {"host": "127.0.0.1", "port": 5005},
         }
     )
@@ -309,14 +365,13 @@ def test_inspect_collects_paginated_tools_resources_and_prompts(monkeypatch) -> 
     assert registry.prompts[0].name == "summary_prompt"
 
 
-def test_validate_rejects_missing_registry_when_mcp_enabled(tmp_path: Path) -> None:
+def test_validate_warns_missing_registry_when_mcp_enabled(tmp_path: Path) -> None:
     application_path = tmp_path / "application.yaml"
     registry_path = tmp_path / "nonexistent" / "registry.json"
     write_application(application_path, mcp={"enabled": True, "upstream_url": "https://mcp.example.com"})
 
     result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--registry", str(registry_path)])
-    assert result.exit_code != 0
-    assert "MCP registry not found" in str(result.exception)
+    assert result.exit_code == 0
 
 
 def test_llm_proxy_successful_forwarding(monkeypatch) -> None:

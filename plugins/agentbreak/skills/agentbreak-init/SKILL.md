@@ -12,8 +12,10 @@ You are helping the user set up AgentBreak for chaos testing their agent.
 1. Check AgentBreak is installed
 2. Run `agentbreak init`
 3. Analyze the codebase
-4. Configure `application.yaml` and `scenarios.yaml` based on findings
-5. Validate the config
+4. Ask: mock or proxy mode?
+5. Configure `application.yaml` and `scenarios.yaml` based on findings + mode
+6. Validate the config (+ test connection if proxy)
+7. Offer project-specific scenarios
 
 Ask the user to confirm before writing config.
 
@@ -58,23 +60,33 @@ Present findings:
 
 If the provider is ambiguous, ask which one to use.
 
-## Step 4: Configure
+## Step 4: Ask mode preference
 
-Based on analysis, write `.agentbreak/application.yaml`:
+After presenting codebase findings, ask the user:
 
-**Mock mode (no API key needed — good for demos):**
+> "How do you want to run chaos tests?"
+>
+> 1. **Mock mode** — No API keys needed. AgentBreak generates synthetic responses. Good for demos, CI, and testing fault handling logic.
+> 2. **Proxy mode** — Real API traffic. AgentBreak sits between your agent and the real upstream, injecting faults into live calls. Requires valid API keys.
+
+## Step 5: Configure
+
+Based on analysis + mode choice, write `.agentbreak/application.yaml`:
+
+**Mock mode:**
 
 ```yaml
 llm:
   enabled: true
   mode: mock
 mcp:
-  enabled: false
+  enabled: true   # if MCP detected
+  mode: mock
 serve:
   port: 5005
 ```
 
-**Proxy mode (real API):**
+**Proxy mode:**
 
 ```yaml
 llm:
@@ -85,61 +97,24 @@ llm:
     type: bearer
     env: OPENAI_API_KEY
 mcp:
-  enabled: false
+  enabled: true   # if MCP detected
+  mode: proxy
+  upstream_url: http://localhost:8001/mcp
+  # auth: ...
 serve:
   port: 5005
 ```
 
-**If MCP detected, add:**
+For proxy mode, use the detected upstream URLs and auth env vars from Step 3. If MCP was detected but no upstream URL was found, ask the user for it.
 
-```yaml
-mcp:
-  enabled: true
-  upstream_url: http://localhost:8001/mcp
-```
-
-Write `.agentbreak/scenarios.yaml` based on findings. Good starter:
-
-```yaml
-version: 1
-scenarios:
-  - name: llm-rate-limited
-    summary: LLM returns 429 rate limit
-    target: llm_chat
-    fault:
-      kind: http_error
-      status_code: 429
-    schedule:
-      mode: random
-      probability: 0.3
-
-  - name: llm-slow
-    summary: LLM takes 3-8 seconds
-    target: llm_chat
-    fault:
-      kind: latency
-      min_ms: 3000
-      max_ms: 8000
-    schedule:
-      mode: random
-      probability: 0.3
-
-  - name: llm-bad-json
-    summary: LLM returns unparseable response
-    target: llm_chat
-    fault:
-      kind: invalid_json
-    schedule:
-      mode: random
-      probability: 0.15
-```
-
-If agent has no retry logic → higher probabilities (0.3-0.5).
-If agent has retries → lower probabilities (0.1-0.2).
+`agentbreak init` generates `scenarios.yaml` with a standard preset based on what's enabled:
+- LLM only → `preset: standard` (6 baseline LLM scenarios)
+- MCP only → `preset: standard-mcp` (7 baseline MCP scenarios)
+- Both → `preset: standard-all` (13 baseline scenarios)
 
 Present the generated config and ask for confirmation before writing.
 
-## Step 5: Validate
+## Step 6: Validate
 
 ```bash
 agentbreak validate
@@ -147,13 +122,39 @@ agentbreak validate
 
 If validation fails, fix the config and re-validate.
 
+**If proxy mode is configured**, run an auth pre-check:
+
+```bash
+agentbreak validate --test-connection
+```
+
+This tests connectivity and auth against the upstream(s). Possible results:
+- **OK** — upstream reachable, auth works. Proceed.
+- **AUTH FAILED (401)** — bad API key or token. Help the user fix it before continuing.
+- **FORBIDDEN (403)** — key valid but insufficient permissions.
+- **CONNECTION FAILED** — wrong URL or upstream is down.
+- **TIMEOUT** — upstream too slow to respond.
+
+If auth fails, help the user fix the config (check env var name, verify the key is set, confirm URL). Re-run `--test-connection` until it passes. Do NOT proceed to chaos testing with broken auth — every test will fail for the wrong reason.
+
+Skip `--test-connection` for mock mode (no upstream to check).
+
+## Step 7: Offer project-specific scenarios
+
+After validation passes, tell the user what standard scenarios are included, then ask:
+
+> "Standard chaos tests are ready — these cover baseline faults like rate limits, server errors, latency, bad JSON, empty responses, and schema violations.
+>
+> Want me to also analyze your codebase and generate project-specific scenarios? These target your specific tools, models, and failure modes."
+
+- If **yes** → analyze the codebase (same as `agentbreak-create-tests` skill: read MCP registry for tool names, scan code for specific models and integrations), generate targeted scenarios, append them under the `scenarios:` key in `scenarios.yaml` (keeping the preset), re-validate.
+- If **no** → done, show next steps.
+
 ## Done
 
 Tell the user:
 
-> "AgentBreak is initialized. Next steps:
-> - `/agentbreak:create-tests` to customize scenarios
-> - `/agentbreak:run-tests` to start chaos testing"
+> "AgentBreak is initialized. Run `/agentbreak:run-tests` to start chaos testing."
 
 ## Rules
 

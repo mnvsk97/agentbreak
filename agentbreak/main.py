@@ -24,10 +24,16 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from agentbreak import __version__
 from agentbreak.behaviors import apply_response_behavior
-from agentbreak.config import ApplicationConfig, MCPRegistry, load_application_config, load_registry, save_registry
+from agentbreak.config import ApplicationConfig, MCPConfig, MCPRegistry, load_application_config, load_registry, save_registry
 from agentbreak.discovery.mcp import MCP_PROTOCOL_VERSION, inspect_mcp_server, parse_mcp_response
 from agentbreak.history import RunHistory
 from agentbreak.scenarios import Scenario, ScenarioFile, load_scenarios, validate_scenarios
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"agentbreak {__version__}")
+        raise typer.Exit()
 
 
 cli = typer.Typer(
@@ -42,6 +48,13 @@ cli = typer.Typer(
         "  curl localhost:5005/_agentbreak/scorecard"
     ),
 )
+
+
+@cli.callback(invoke_without_command=True)
+def main(
+    version: bool = typer.Option(False, "--version", "-V", help="Show version and exit.", callback=_version_callback, is_eager=True),
+) -> None:
+    pass
 app = FastAPI(title="agentbreak")
 
 DEFAULT_APPLICATION_YAML = """\
@@ -66,29 +79,72 @@ serve:
   port: 5005
 """
 
-DEFAULT_SCENARIOS_YAML = """\
+SCENARIOS_YAML_LLM_ONLY = """\
 version: 1
-scenarios:
-  - name: llm-latency
-    summary: Random latency on LLM calls
-    target: llm_chat
-    fault:
-      kind: latency
-      min_ms: 2000
-      max_ms: 5000
-    schedule:
-      mode: random
-      probability: 0.3
+preset: standard
+# Standard preset includes: rate limit (429), server error (500),
+# latency (3-8s), invalid JSON, empty response, schema violation.
+#
+# Add project-specific scenarios below:
+# scenarios:
+#   - name: my-scenario
+#     summary: Description
+#     target: llm_chat
+#     fault:
+#       kind: http_error
+#       status_code: 429
+#     schedule:
+#       mode: random
+#       probability: 0.2
+#
+# ─── Available presets ───────────────────────────────────────
+# standard          — Baseline LLM faults (6 scenarios)
+# standard-mcp      — Baseline MCP faults (7 scenarios)
+# standard-all      — Both LLM + MCP baselines (13 scenarios)
+# brownout          — LLM latency + rate limits
+# mcp-slow-tools    — MCP latency
+# mcp-tool-failures — MCP 503 errors
+# mcp-mixed-transient — MCP latency + errors
+"""
 
-  - name: llm-error
-    summary: Random server errors on LLM calls
-    target: llm_chat
-    fault:
-      kind: http_error
-      status_code: 500
-    schedule:
-      mode: random
-      probability: 0.2
+SCENARIOS_YAML_MCP_ONLY = """\
+version: 1
+preset: standard-mcp
+# Standard MCP preset includes: 503 unavailable, timeout (5-15s),
+# latency (3-8s), empty response, invalid JSON, schema violation, wrong content.
+#
+# Add project-specific scenarios below:
+# scenarios:
+#   - name: my-tool-scenario
+#     summary: Description
+#     target: mcp_tool
+#     match:
+#       tool_name: my_tool
+#     fault:
+#       kind: timeout
+#       min_ms: 5000
+#       max_ms: 10000
+#     schedule:
+#       mode: random
+#       probability: 0.2
+"""
+
+SCENARIOS_YAML_ALL = """\
+version: 1
+preset: standard-all
+# Standard preset includes 13 baseline scenarios for both LLM and MCP.
+#
+# Add project-specific scenarios below:
+# scenarios:
+#   - name: my-scenario
+#     summary: Description
+#     target: llm_chat
+#     fault:
+#       kind: http_error
+#       status_code: 429
+#     schedule:
+#       mode: random
+#       probability: 0.2
 """
 
 
@@ -116,6 +172,9 @@ class LLMStats:
     response_mutations: int = 0
     duplicate_requests: int = 0
     suspected_loops: int = 0
+    fault_recoveries: int = 0
+    unrecovered_faults: int = 0
+    _pending_fault: bool = field(default=False, repr=False)
     seen_fingerprints: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=20))
 
@@ -173,8 +232,13 @@ class LLMRuntime:
             elif scenario.fault.kind == "http_error":
                 self.stats.injected_faults += 1
                 self.stats.upstream_failures += 1
+                self.stats._pending_fault = True
                 logger.info("injecting http_error %d via %s", scenario.fault.status_code or 500, scenario.name)
                 return JSONResponse(status_code=scenario.fault.status_code or 500, content=error_fn(scenario.fault.status_code or 500))
+        else:
+            if self.stats._pending_fault:
+                self.stats.fault_recoveries += 1
+                self.stats._pending_fault = False
 
         upstream_path = "/v1/messages" if api_format == "anthropic" else "/v1/chat/completions"
 
@@ -183,7 +247,7 @@ class LLMRuntime:
 
         if self.mode == "mock":
             mock_fn = mock_anthropic_completion if api_format == "anthropic" else mock_completion
-            response_body = json.dumps(mock_fn()).encode("utf-8")
+            response_body = json.dumps(mock_fn(payload)).encode("utf-8")
         else:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 try:
@@ -289,11 +353,16 @@ class LLMRuntime:
         )
 
     def scorecard_data(self) -> dict[str, Any]:
+        unrecovered = self.stats.injected_faults - self.stats.fault_recoveries
+        if unrecovered < 0:
+            unrecovered = 0
+        self.stats.unrecovered_faults = unrecovered
         score = 100
         score -= self.stats.injected_faults * 3
         score -= self.stats.upstream_failures * 12
         score -= self.stats.duplicate_requests * 2
         score -= self.stats.suspected_loops * 10
+        score += self.stats.fault_recoveries * 5
         score = max(0, min(100, score))
         if self.stats.upstream_failures == 0 and self.stats.suspected_loops == 0:
             outcome = "PASS"
@@ -310,6 +379,8 @@ class LLMRuntime:
             "response_mutations": self.stats.response_mutations,
             "duplicate_requests": self.stats.duplicate_requests,
             "suspected_loops": self.stats.suspected_loops,
+            "fault_recoveries": self.stats.fault_recoveries,
+            "unrecovered_faults": unrecovered,
             "run_outcome": outcome,
             "resilience_score": score,
         }
@@ -342,6 +413,7 @@ class MCPRuntime:
     auth_headers: dict[str, str]
     registry: MCPRegistry
     scenarios: list[Scenario]
+    config: MCPConfig = field(default_factory=MCPConfig)
     scenario_counters: dict[str, int] = field(default_factory=dict)
     session_id: str | None = None
     upstream_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -402,7 +474,7 @@ class MCPRuntime:
         return JSONResponse(status_code=404, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"Unknown method {method}"}})
 
     async def _initialize_upstream(self) -> None:
-        if not self.upstream_url or self.session_id:
+        if not self.upstream_url or self.session_id or self.config.mode == "mock":
             return
         async with self.upstream_lock:
             if self.session_id:
@@ -497,7 +569,7 @@ class MCPRuntime:
         return JSONResponse(content={"jsonrpc": "2.0", "id": request_id, "result": result})
 
     async def _call_upstream_or_mock(self, method: str, params: dict[str, Any], request_id: Any) -> dict[str, Any] | Response:
-        if self.upstream_url:
+        if self.upstream_url and self.config.mode != "mock":
             async with self.upstream_lock:
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     try:
@@ -647,13 +719,20 @@ def load_service_state(
     config_path: str | None,
     scenarios_path: str | None,
     registry_path: str | None,
+    *,
+    require_registry: bool = True,
 ) -> ServiceState:
     application = load_application_config(config_path)
     scenarios = load_scenarios(scenarios_path)
     validate_scenarios(scenarios)
     registry = MCPRegistry()
     if application.mcp.enabled:
-        registry = load_registry(registry_path)
+        try:
+            registry = load_registry(registry_path)
+        except ValueError:
+            if require_registry:
+                raise
+            logger.warning("MCP enabled but registry not found. Run `agentbreak inspect` to create it.")
 
     llm_runtime = None
     if application.llm.enabled:
@@ -671,6 +750,7 @@ def load_service_state(
             auth_headers=application.mcp.auth.headers(),
             registry=registry,
             scenarios=scenarios.scenarios,
+            config=application.mcp,
         )
 
     history = RunHistory(db_path=application.history.db_path) if application.history.enabled else None
@@ -717,7 +797,40 @@ async def apply_latency_fault(scenario: Scenario) -> None:
     await asyncio.sleep(random.randint(scenario.fault.min_ms, scenario.fault.max_ms) / 1000)
 
 
-def mock_anthropic_completion() -> dict[str, Any]:
+def _should_mock_tool_call(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Check if the request has tools and the last message isn't a tool result — if so, return a mock tool call."""
+    tools = payload.get("tools")
+    if not tools:
+        return None
+    messages = payload.get("messages") or []
+    if messages and messages[-1].get("role") == "tool":
+        return None
+    tool = tools[0]
+    fn = tool.get("function", tool)
+    return {"name": fn.get("name", "mock_tool"), "arguments": "{}"}
+
+
+def mock_anthropic_completion(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = payload or {}
+    tool_call = None
+    tools = payload.get("tools")
+    if tools:
+        messages = payload.get("messages") or []
+        last_role = messages[-1].get("role") if messages else None
+        if last_role != "tool":
+            tool = tools[0]
+            tool_call = {"type": "tool_use", "id": "toolu_agentbreak_mock", "name": tool.get("name", "mock_tool"), "input": {}}
+    if tool_call:
+        return {
+            "id": "msg-agentbreak-mock",
+            "type": "message",
+            "role": "assistant",
+            "content": [tool_call],
+            "model": "agentbreak-mock",
+            "stop_reason": "tool_use",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
     return {
         "id": "msg-agentbreak-mock",
         "type": "message",
@@ -730,7 +843,28 @@ def mock_anthropic_completion() -> dict[str, Any]:
     }
 
 
-def mock_completion() -> dict[str, Any]:
+def mock_completion(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = payload or {}
+    tool_call = _should_mock_tool_call(payload)
+    if tool_call:
+        return {
+            "id": "chatcmpl-agentbreak-mock",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "agentbreak-mock",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{"id": "call_agentbreak_mock", "type": "function", "function": tool_call}],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
     return {
         "id": "chatcmpl-agentbreak-mock",
         "object": "chat.completion",
@@ -1025,6 +1159,7 @@ def _save_run_to_history() -> None:
 
 
 @app.post("/v1/chat/completions")
+@app.post("/chat/completions")
 async def proxy_chat_completions(request: Request):
     state = require_service_state()
     if state.llm_runtime is None:
@@ -1033,6 +1168,7 @@ async def proxy_chat_completions(request: Request):
 
 
 @app.post("/v1/messages")
+@app.post("/messages")
 async def proxy_anthropic_messages(request: Request):
     state = require_service_state()
     if state.llm_runtime is None:
@@ -1051,6 +1187,18 @@ async def handle_mcp(request: Request):
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/_agentbreak/reset")
+async def reset_agentbreak_stats() -> dict[str, str]:
+    state = require_service_state()
+    if state.llm_runtime is not None:
+        state.llm_runtime.stats = LLMStats()
+        state.llm_runtime.scenario_counters.clear()
+    if state.mcp_runtime is not None:
+        state.mcp_runtime.stats = MCPStats()
+        state.mcp_runtime.scenario_counters.clear()
+    return {"status": "reset"}
 
 
 @app.get("/_agentbreak/scorecard")
@@ -1115,23 +1263,190 @@ async def get_agentbreak_history_run(run_id: int) -> JSONResponse:
     return JSONResponse(content=result)
 
 
+def _detect_framework() -> dict[str, str]:
+    """Scan project files to detect LLM framework, MCP usage, and suggest config."""
+    detection: dict[str, str] = {}
+    # Check pyproject.toml
+    pyproject = Path("pyproject.toml")
+    requirements = Path("requirements.txt")
+    content = ""
+    if pyproject.exists():
+        content += pyproject.read_text(encoding="utf-8")
+    if requirements.exists():
+        content += requirements.read_text(encoding="utf-8")
+    # Also check package.json for JS projects
+    package_json = Path("package.json")
+    if package_json.exists():
+        content += package_json.read_text(encoding="utf-8")
+
+    content_lower = content.lower()
+
+    if "langchain-openai" in content_lower or "openai" in content_lower:
+        detection["provider"] = "openai"
+        detection["upstream_url"] = "https://api.openai.com"
+        detection["env"] = "OPENAI_API_KEY"
+    if "langchain-anthropic" in content_lower or "anthropic" in content_lower:
+        detection["provider"] = "anthropic"
+        detection["upstream_url"] = "https://api.anthropic.com"
+        detection["env"] = "ANTHROPIC_API_KEY"
+
+    # --- MCP detection ---
+    # Check dependency files for MCP packages
+    mcp_dep_markers = [
+        "langchain-mcp-adapters",
+        "langchain-mcp",
+        "@modelcontextprotocol/sdk",
+        "mcp-client",
+        "fastmcp",
+    ]
+    for marker in mcp_dep_markers:
+        if marker in content_lower:
+            detection["mcp"] = "true"
+            break
+
+    # Scan Python source files for MCP imports/usage
+    if "mcp" not in detection:
+        mcp_source_markers = [
+            "MultiServerMCPClient",
+            "MCPClient",
+            "from mcp",
+            "import mcp",
+            "mcp_tool",
+            "langchain_mcp",
+        ]
+        for py_file in Path(".").glob("*.py"):
+            try:
+                src = py_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for marker in mcp_source_markers:
+                if marker in src:
+                    detection["mcp"] = "true"
+                    break
+            if "mcp" in detection:
+                break
+
+    # Check for custom gateways (TFY, LiteLLM, etc.)
+    env_file = Path(".env")
+    if env_file.exists():
+        env_content = env_file.read_text(encoding="utf-8")
+        for line in env_content.splitlines():
+            if "GATEWAY_URL" in line and "=" in line:
+                _, _, val = line.partition("=")
+                val = val.strip().strip("\"'")
+                if val:
+                    detection["upstream_url"] = val
+                    detection["provider"] = "gateway"
+            if "TFY_API_KEY" in line:
+                detection["env"] = "TFY_API_KEY"
+            # Detect MCP upstream URL from env
+            if "mcp" not in detection and "MCP" in line and "URL" in line and "=" in line:
+                detection["mcp"] = "true"
+            if "MCP" in line and "URL" in line and "=" in line:
+                _, _, val = line.partition("=")
+                val = val.strip().strip("\"'")
+                if val:
+                    detection["mcp_upstream_url"] = val
+            if "MCP" in line and "API_KEY" in line and "=" in line:
+                key_name = line.partition("=")[0].strip()
+                detection["mcp_auth_env"] = key_name
+
+    return detection
+
+
+def _generate_application_yaml(detection: dict[str, str]) -> str:
+    """Generate application.yaml content, customized if framework detected."""
+    if not detection:
+        return DEFAULT_APPLICATION_YAML
+    upstream = detection.get("upstream_url", "")
+    env_key = detection.get("env", "")
+    provider = detection.get("provider", "")
+    mcp_detected = detection.get("mcp") == "true"
+    mcp_upstream = detection.get("mcp_upstream_url", "")
+    mcp_auth_env = detection.get("mcp_auth_env", "")
+
+    lines: list[str] = []
+
+    # LLM section
+    lines.append("llm:")
+    lines.append("  enabled: true")
+    lines.append("  mode: mock")
+    if provider and upstream:
+        lines.append(f"  # Detected: {provider}")
+        lines.append("  # Switch to proxy mode to test against real upstream:")
+        lines.append("  # mode: proxy")
+        lines.append(f"  # upstream_url: {upstream}")
+        lines.append("  # auth:")
+        lines.append("  #   type: bearer")
+        lines.append(f"  #   env: {env_key}")
+    lines.append("")
+
+    # MCP section — enabled when detected
+    lines.append("mcp:")
+    if mcp_detected:
+        lines.append("  enabled: true")
+        if mcp_upstream:
+            lines.append(f"  upstream_url: {mcp_upstream}")
+            lines.append("  # mode: mock  # Switch to mock mode to test without upstream")
+        else:
+            lines.append("  mode: mock")
+            lines.append("  # upstream_url: http://127.0.0.1:8001/mcp")
+            lines.append("  # mode: proxy  # Switch to proxy mode to test against real MCP server")
+        if mcp_auth_env:
+            lines.append("  auth:")
+            lines.append("    type: bearer")
+            lines.append(f"    env: {mcp_auth_env}")
+        else:
+            lines.append("  # auth:")
+            lines.append("  #   type: bearer")
+            lines.append("  #   env: MCP_TOKEN")
+    else:
+        lines.append("  enabled: false")
+        lines.append("  # upstream_url: http://127.0.0.1:8001/mcp")
+        lines.append("  # auth:")
+        lines.append("  #   type: bearer")
+        lines.append("  #   env: MCP_TOKEN")
+    lines.append("")
+
+    lines.append("serve:")
+    lines.append("  port: 5005")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 @cli.command(help="Initialize .agentbreak/ with default configuration files.")
 def init() -> None:
     agentbreak_dir = Path(".agentbreak")
     agentbreak_dir.mkdir(exist_ok=True)
 
+    detection = _detect_framework()
+    if detection:
+        typer.echo(f"Detected: {detection.get('provider', 'unknown')} (upstream: {detection.get('upstream_url', 'N/A')})")
+        if detection.get("mcp") == "true":
+            mcp_url = detection.get("mcp_upstream_url", "auto")
+            typer.echo(f"Detected: MCP usage (upstream: {mcp_url})")
+
     app_path = agentbreak_dir / "application.yaml"
     if app_path.exists():
         typer.echo(f"Already exists: {app_path}")
     else:
-        app_path.write_text(DEFAULT_APPLICATION_YAML, encoding="utf-8")
+        app_path.write_text(_generate_application_yaml(detection), encoding="utf-8")
         typer.echo(f"Created {app_path}")
 
     scenarios_path = agentbreak_dir / "scenarios.yaml"
     if scenarios_path.exists():
         typer.echo(f"Already exists: {scenarios_path}")
     else:
-        scenarios_path.write_text(DEFAULT_SCENARIOS_YAML, encoding="utf-8")
+        has_mcp = detection.get("mcp") == "true"
+        has_llm = detection.get("provider") is not None
+        if has_llm and has_mcp:
+            scenarios_yaml = SCENARIOS_YAML_ALL
+        elif has_mcp:
+            scenarios_yaml = SCENARIOS_YAML_MCP_ONLY
+        else:
+            scenarios_yaml = SCENARIOS_YAML_LLM_ONLY
+        scenarios_path.write_text(scenarios_yaml, encoding="utf-8")
         typer.echo(f"Created {scenarios_path}")
 
 
@@ -1175,7 +1490,7 @@ def serve(
     logger.info("starting on %s:%d", host, port)
     logger.info(
         "llm=%s mcp=%s scenarios=%d",
-        "proxy" if service_state.application.llm.enabled else "off",
+        service_state.application.llm.mode if service_state.application.llm.enabled else "off",
         "on" if service_state.application.mcp.enabled else "off",
         len(service_state.scenarios.scenarios),
     )
@@ -1189,13 +1504,75 @@ def serve(
         _save_run_to_history()
 
 
+def _check_upstream_auth(application: ApplicationConfig) -> list[str]:
+    """Check connectivity and auth for proxy-mode upstreams. Returns list of status messages."""
+    results: list[str] = []
+    if application.llm.enabled and application.llm.mode == "proxy" and application.llm.upstream_url:
+        url = application.llm.upstream_url.rstrip("/")
+        headers = application.llm.auth.headers()
+        # Detect provider from URL to pick the right health check
+        is_anthropic = "anthropic" in url
+        try:
+            if is_anthropic:
+                resp = httpx.post(
+                    f"{url}/v1/messages",
+                    headers={**headers, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                    json={"model": "claude-haiku-4-5-20251001", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
+                    timeout=10.0,
+                )
+            else:
+                resp = httpx.get(f"{url}/v1/models", headers=headers, timeout=10.0)
+            if resp.status_code in (200, 201):
+                results.append(f"LLM upstream ({url}): OK")
+            elif resp.status_code == 401:
+                results.append(f"LLM upstream ({url}): AUTH FAILED (401)")
+            elif resp.status_code == 403:
+                results.append(f"LLM upstream ({url}): FORBIDDEN (403)")
+            else:
+                results.append(f"LLM upstream ({url}): HTTP {resp.status_code}")
+        except httpx.ConnectError:
+            results.append(f"LLM upstream ({url}): CONNECTION FAILED")
+        except httpx.TimeoutException:
+            results.append(f"LLM upstream ({url}): TIMEOUT")
+        except Exception as exc:
+            results.append(f"LLM upstream ({url}): ERROR ({exc})")
+
+    if application.mcp.enabled and application.mcp.mode == "proxy" and application.mcp.upstream_url:
+        url = application.mcp.upstream_url
+        headers = application.mcp.auth.headers()
+        try:
+            resp = httpx.post(
+                url,
+                headers={**headers, "content-type": "application/json"},
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "agentbreak-check", "version": "1.0"}}},
+                timeout=10.0,
+            )
+            if resp.status_code in (200, 201):
+                results.append(f"MCP upstream ({url}): OK")
+            elif resp.status_code == 401:
+                results.append(f"MCP upstream ({url}): AUTH FAILED (401)")
+            elif resp.status_code == 403:
+                results.append(f"MCP upstream ({url}): FORBIDDEN (403)")
+            else:
+                results.append(f"MCP upstream ({url}): HTTP {resp.status_code}")
+        except httpx.ConnectError:
+            results.append(f"MCP upstream ({url}): CONNECTION FAILED")
+        except httpx.TimeoutException:
+            results.append(f"MCP upstream ({url}): TIMEOUT")
+        except Exception as exc:
+            results.append(f"MCP upstream ({url}): ERROR ({exc})")
+
+    return results
+
+
 @cli.command(help="Validate application, scenario, and registry files without starting the server.")
 def validate(
     config_path: str | None = typer.Option(None, "--config", help="Config path. Defaults to .agentbreak/application.yaml."),
     scenarios_path: str | None = typer.Option(None, "--scenarios", help="Scenarios path. Defaults to .agentbreak/scenarios.yaml."),
     registry_path: str | None = typer.Option(None, "--registry", help="Registry path."),
+    test_connection: bool = typer.Option(False, "--test-connection", help="Test upstream connectivity and auth for proxy-mode endpoints."),
 ) -> None:
-    state = load_service_state(config_path, scenarios_path, registry_path)
+    state = load_service_state(config_path, scenarios_path, registry_path, require_registry=False)
     typer.echo(
         "Config valid: "
         f"llm_enabled={state.application.llm.enabled} "
@@ -1203,6 +1580,13 @@ def validate(
         f"scenarios={len(state.scenarios.scenarios)} "
         f"tools={len(state.registry.tools)}"
     )
+    if test_connection:
+        results = _check_upstream_auth(state.application)
+        if results:
+            for r in results:
+                typer.echo(r)
+        else:
+            typer.echo("No proxy-mode upstreams to check.")
 
 
 @cli.command(help="Run the local verification suite.")
