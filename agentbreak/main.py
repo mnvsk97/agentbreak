@@ -6,11 +6,13 @@ import json
 import logging
 import random
 import signal
+import statistics
 import subprocess
 import sys
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -163,6 +165,22 @@ service_state: ServiceState | None = None
 
 
 @dataclass
+class ScenarioStat:
+    triggered: int = 0
+    recovered: int = 0
+    unrecovered: int = 0
+    kind: str = ""
+
+
+@dataclass
+class ModelStat:
+    requests: int = 0
+    faults: int = 0
+    recovered: int = 0
+    latency_samples: list[float] = field(default_factory=list)
+
+
+@dataclass
 class LLMStats:
     total_requests: int = 0
     injected_faults: int = 0
@@ -175,8 +193,13 @@ class LLMStats:
     fault_recoveries: int = 0
     unrecovered_faults: int = 0
     _pending_fault: bool = field(default=False, repr=False)
+    _pending_scenario: str | None = field(default=None, repr=False)
+    _pending_model: str | None = field(default=None, repr=False)
     seen_fingerprints: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=20))
+    scenario_stats: dict[str, ScenarioStat] = field(default_factory=dict)
+    model_stats: dict[str, ModelStat] = field(default_factory=dict)
+    latency_samples: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -196,6 +219,8 @@ class MCPStats:
     tool_failures_by_name: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     seen_fingerprints: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     recent_requests: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=40))
+    scenario_stats: dict[str, ScenarioStat] = field(default_factory=dict)
+    latency_samples: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -208,6 +233,7 @@ class LLMRuntime:
     scenario_counters: dict[str, int] = field(default_factory=dict)
 
     async def handle_chat(self, request: Request, *, api_format: str = "openai") -> Response:
+        t0 = time.monotonic()
         body = await request.body()
         self._record_request(body)
         payload, has_parse_error = parse_json_body(body)
@@ -215,17 +241,23 @@ class LLMRuntime:
         if has_parse_error:
             return JSONResponse(status_code=400, content=error_fn(400, message_override="Malformed JSON request body."))
 
+        model = payload.get("model") or "unknown"
+        ms = self.stats.model_stats.setdefault(model, ModelStat())
+        ms.requests += 1
+
         is_streaming = payload.get("stream") is True
 
         scenario = choose_matching_scenario(
             self.scenarios,
             "llm_chat",
-            {"route": str(request.url.path), "method": request.method, "model": payload.get("model")},
+            {"route": str(request.url.path), "method": request.method, "model": model},
             self.scenario_counters,
         )
 
         if scenario is not None:
             logger.debug("matched scenario %s for llm_chat", scenario.name)
+            ss = self.stats.scenario_stats.setdefault(scenario.name, ScenarioStat(kind=scenario.fault.kind))
+            ss.triggered += 1
             if scenario.fault.kind == "latency":
                 self.stats.latency_injections += 1
                 await apply_latency_fault(scenario)
@@ -233,12 +265,28 @@ class LLMRuntime:
                 self.stats.injected_faults += 1
                 self.stats.upstream_failures += 1
                 self.stats._pending_fault = True
+                self.stats._pending_scenario = scenario.name
+                self.stats._pending_model = model
+                ms.faults += 1
+                ss.unrecovered += 1
                 logger.info("injecting http_error %d via %s", scenario.fault.status_code or 500, scenario.name)
+                self._record_latency(t0, model)
                 return JSONResponse(status_code=scenario.fault.status_code or 500, content=error_fn(scenario.fault.status_code or 500))
         else:
             if self.stats._pending_fault:
                 self.stats.fault_recoveries += 1
                 self.stats._pending_fault = False
+                # Mark recovery on the scenario and model that caused the fault
+                prev_scenario = self.stats._pending_scenario
+                prev_model = self.stats._pending_model
+                if prev_scenario and prev_scenario in self.stats.scenario_stats:
+                    ps = self.stats.scenario_stats[prev_scenario]
+                    ps.recovered += 1
+                    ps.unrecovered = max(0, ps.unrecovered - 1)
+                if prev_model and prev_model in self.stats.model_stats:
+                    self.stats.model_stats[prev_model].recovered += 1
+                self.stats._pending_scenario = None
+                self.stats._pending_model = None
 
         upstream_path = "/v1/messages" if api_format == "anthropic" else "/v1/chat/completions"
 
@@ -277,10 +325,14 @@ class LLMRuntime:
             mutate_fn = mutate_anthropic_body if api_format == "anthropic" else mutate_llm_body
             response_body = mutate_fn(response_body, scenario)
             self.stats.response_mutations += 1
+            self.stats.injected_faults += 1
+            ms.faults += 1
             self.stats.upstream_successes += 1
+            self._record_latency(t0, model)
             return Response(content=response_body, status_code=200, media_type="application/json")
 
         self.stats.upstream_successes += 1
+        self._record_latency(t0, model)
         if self.mode == "proxy":
             return Response(
                 content=response_body,
@@ -357,20 +409,67 @@ class LLMRuntime:
         if unrecovered < 0:
             unrecovered = 0
         self.stats.unrecovered_faults = unrecovered
-        score = 100
-        score -= self.stats.injected_faults * 3
-        score -= self.stats.upstream_failures * 12
-        score -= self.stats.duplicate_requests * 2
-        score -= self.stats.suspected_loops * 10
-        score += self.stats.fault_recoveries * 5
-        score = max(0, min(100, score))
+        recovery_rate = (self.stats.fault_recoveries / self.stats.injected_faults) if self.stats.injected_faults > 0 else None
+
+        # Score calculation with breakdown
+        fault_penalty = self.stats.injected_faults * 3
+        failure_penalty = self.stats.upstream_failures * 12
+        dup_penalty = self.stats.duplicate_requests * 2
+        loop_penalty = self.stats.suspected_loops * 10
+        recovery_bonus = self.stats.fault_recoveries * 5
+        score = max(0, min(100, 100 - fault_penalty - failure_penalty - dup_penalty - loop_penalty + recovery_bonus))
+
         if self.stats.upstream_failures == 0 and self.stats.suspected_loops == 0:
             outcome = "PASS"
         elif self.stats.upstream_successes > 0:
             outcome = "DEGRADED"
         else:
             outcome = "FAIL"
+
+        # Per-scenario breakdown
+        scenarios = []
+        for name, ss in self.stats.scenario_stats.items():
+            status = "not_triggered"
+            if ss.triggered > 0:
+                if ss.unrecovered == 0:
+                    status = "survived"
+                elif ss.recovered > 0:
+                    status = "partial"
+                else:
+                    status = "failed"
+            scenarios.append({
+                "name": name,
+                "kind": ss.kind,
+                "triggered": ss.triggered,
+                "recovered": ss.recovered,
+                "unrecovered": ss.unrecovered,
+                "status": status,
+            })
+
+        # Per-model breakdown
+        models = {}
+        for model_name, ms in self.stats.model_stats.items():
+            entry: dict[str, Any] = {
+                "requests": ms.requests,
+                "faults": ms.faults,
+                "recovered": ms.recovered,
+            }
+            if ms.latency_samples:
+                entry["avg_latency_ms"] = round(statistics.mean(ms.latency_samples))
+            models[model_name] = entry
+
+        # Latency stats
+        latency: dict[str, Any] | None = None
+        if self.stats.latency_samples:
+            sorted_samples = sorted(self.stats.latency_samples)
+            latency = {
+                "avg_ms": round(statistics.mean(sorted_samples)),
+                "p95_ms": round(sorted_samples[int(len(sorted_samples) * 0.95)] if len(sorted_samples) >= 2 else sorted_samples[-1]),
+                "max_ms": round(sorted_samples[-1]),
+            }
+
         return {
+            # Summary (backward-compatible top-level fields)
             "requests_seen": self.stats.total_requests,
             "injected_faults": self.stats.injected_faults,
             "latency_injections": self.stats.latency_injections,
@@ -381,12 +480,35 @@ class LLMRuntime:
             "suspected_loops": self.stats.suspected_loops,
             "fault_recoveries": self.stats.fault_recoveries,
             "unrecovered_faults": unrecovered,
+            "recovery_rate": round(recovery_rate, 2) if recovery_rate is not None else None,
             "run_outcome": outcome,
             "resilience_score": score,
+            # Score breakdown
+            "score_breakdown": {
+                "base": 100,
+                "fault_penalty": -fault_penalty,
+                "failure_penalty": -failure_penalty,
+                "duplicate_penalty": -dup_penalty,
+                "loop_penalty": -loop_penalty,
+                "recovery_bonus": recovery_bonus,
+            },
+            # Per-scenario
+            "scenarios": scenarios,
+            # Per-model
+            "models": models,
+            # Latency
+            "latency": latency,
         }
 
     def current_requests(self) -> dict[str, Any]:
         return {"recent_requests": list(self.stats.recent_requests)}
+
+    def _record_latency(self, t0: float, model: str) -> None:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        self.stats.latency_samples.append(elapsed_ms)
+        ms = self.stats.model_stats.get(model)
+        if ms:
+            ms.latency_samples.append(elapsed_ms)
 
     def _record_request(self, body: bytes) -> None:
         self.stats.total_requests += 1
@@ -521,6 +643,7 @@ class MCPRuntime:
                 )
 
     async def _handle_action(self, payload: dict[str, Any], request_id: Any, method: str) -> Response:
+        t0 = time.monotonic()
         params = payload.get("params", {})
         action_name = params.get("name") or params.get("uri") or ""
         if method == "tools/call":
@@ -532,6 +655,10 @@ class MCPRuntime:
             {"tool_name": action_name, "method": method, "route": "/mcp"},
             self.scenario_counters,
         )
+        if scenario is not None:
+            ss = self.stats.scenario_stats.setdefault(scenario.name, ScenarioStat(kind=scenario.fault.kind))
+            ss.triggered += 1
+
         if scenario is not None and scenario.fault.kind in {"latency", "timeout"}:
             self.stats.latency_injections += 1
             await apply_latency_fault(scenario)
@@ -540,18 +667,21 @@ class MCPRuntime:
                 self.stats.upstream_failures += 1
                 if method == "tools/call":
                     self.stats.tool_failures_by_name[action_name] += 1
+                self._record_latency(t0)
                 return JSONResponse(status_code=504, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32001, "message": "MCP action timed out"}})
         if scenario is not None and scenario.fault.kind == "http_error":
             self.stats.injected_faults += 1
             self.stats.upstream_failures += 1
             if method == "tools/call":
                 self.stats.tool_failures_by_name[action_name] += 1
+            self._record_latency(t0)
             return JSONResponse(status_code=scenario.fault.status_code or 500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "AgentBreak injected MCP transport error"}})
 
         result = await self._call_upstream_or_mock(method, params, request_id)
         if isinstance(result, Response):
             if method == "tools/call":
                 self.stats.tool_failures_by_name[action_name] += 1
+            self._record_latency(t0)
             return result
         if scenario is not None and scenario.fault.kind in {"empty_response", "invalid_json", "schema_violation", "wrong_content", "large_response"}:
             mutated = mutate_mcp_result(result, scenario)
@@ -561,12 +691,18 @@ class MCPRuntime:
                 self.stats.upstream_successes += 1
                 if method == "tools/call":
                     self.stats.tool_successes_by_name[action_name] += 1
+                self._record_latency(t0)
                 return Response(content=mutated, status_code=200, media_type="application/json")
             result = mutated
         self.stats.upstream_successes += 1
         if method == "tools/call":
             self.stats.tool_successes_by_name[action_name] += 1
+        self._record_latency(t0)
         return JSONResponse(content={"jsonrpc": "2.0", "id": request_id, "result": result})
+
+    def _record_latency(self, t0: float) -> None:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        self.stats.latency_samples.append(elapsed_ms)
 
     async def _call_upstream_or_mock(self, method: str, params: dict[str, Any], request_id: Any) -> dict[str, Any] | Response:
         if self.upstream_url and self.config.mode != "mock":
@@ -662,19 +798,41 @@ class MCPRuntime:
         return "session" in message
 
     def scorecard_data(self) -> dict[str, Any]:
-        score = 100
-        score -= self.stats.injected_faults * 5
-        score -= self.stats.upstream_failures * 12
-        score -= self.stats.duplicate_requests * 2
-        score -= self.stats.suspected_loops * 10
-        score = max(0, min(100, score))
+        # Score calculation with breakdown
+        fault_penalty = self.stats.injected_faults * 5
+        failure_penalty = self.stats.upstream_failures * 12
+        dup_penalty = self.stats.duplicate_requests * 2
+        loop_penalty = self.stats.suspected_loops * 10
+        score = max(0, min(100, 100 - fault_penalty - failure_penalty - dup_penalty - loop_penalty))
+
         if self.stats.upstream_failures == 0 and self.stats.suspected_loops == 0:
             outcome = "PASS"
         elif self.stats.upstream_successes > 0:
             outcome = "DEGRADED"
         else:
             outcome = "FAIL"
+
+        # Per-scenario breakdown
+        scenarios = []
+        for name, ss in self.stats.scenario_stats.items():
+            scenarios.append({
+                "name": name,
+                "kind": ss.kind,
+                "triggered": ss.triggered,
+            })
+
+        # Latency stats
+        latency: dict[str, Any] | None = None
+        if self.stats.latency_samples:
+            sorted_samples = sorted(self.stats.latency_samples)
+            latency = {
+                "avg_ms": round(statistics.mean(sorted_samples)),
+                "p95_ms": round(sorted_samples[int(len(sorted_samples) * 0.95)] if len(sorted_samples) >= 2 else sorted_samples[-1]),
+                "max_ms": round(sorted_samples[-1]),
+            }
+
         return {
+            # Summary (backward-compatible top-level fields)
             "requests_seen": self.stats.total_requests,
             "tool_calls": self.stats.tool_calls,
             "method_counts": dict(self.stats.method_counts),
@@ -690,6 +848,18 @@ class MCPRuntime:
             "suspected_loops": self.stats.suspected_loops,
             "run_outcome": outcome,
             "resilience_score": score,
+            # Score breakdown
+            "score_breakdown": {
+                "base": 100,
+                "fault_penalty": -fault_penalty,
+                "failure_penalty": -failure_penalty,
+                "duplicate_penalty": -dup_penalty,
+                "loop_penalty": -loop_penalty,
+            },
+            # Per-scenario
+            "scenarios": scenarios,
+            # Latency
+            "latency": latency,
         }
 
     def current_requests(self) -> dict[str, Any]:
@@ -1096,66 +1266,124 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, handle_signal)
 
 
+def _format_summary_lines(label: str, data: dict[str, Any]) -> list[str]:
+    """Format a compact, readable summary for one runtime."""
+    lines = [f"{label}:"]
+    outcome = data["run_outcome"]
+    score = data["resilience_score"]
+    lines.append(f"  Outcome: {outcome}  |  Score: {score}/100")
+
+    # Score breakdown
+    bd = data.get("score_breakdown", {})
+    parts = []
+    for key in ("fault_penalty", "failure_penalty", "duplicate_penalty", "loop_penalty", "recovery_bonus"):
+        val = bd.get(key, 0)
+        if val != 0:
+            parts.append(f"{key.replace('_', ' ')}: {val:+d}")
+    if parts:
+        lines.append(f"  Breakdown: {', '.join(parts)}")
+
+    # Recovery rate (LLM only)
+    rr = data.get("recovery_rate")
+    if rr is not None:
+        lines.append(f"  Recovery rate: {rr:.0%}")
+
+    # Traffic
+    lines.append(f"  Requests: {data['requests_seen']}  |  Faults: {data['injected_faults']}  |  Latency injections: {data['latency_injections']}")
+
+    # Per-scenario (show triggered only, sorted by triggered desc)
+    scenarios = [s for s in data.get("scenarios", []) if s.get("triggered", 0) > 0]
+    if scenarios:
+        scenarios.sort(key=lambda s: s["triggered"], reverse=True)
+        lines.append("  Scenarios:")
+        for s in scenarios:
+            status = s.get("status", "")
+            status_icon = {"survived": "+", "partial": "~", "failed": "-"}.get(status, " ")
+            extra = ""
+            if "recovered" in s:
+                extra = f"  recovered={s['recovered']}"
+            lines.append(f"    [{status_icon}] {s['name']}: triggered={s['triggered']}{extra}")
+
+    # Per-model (LLM only)
+    models = data.get("models", {})
+    if models:
+        lines.append("  Models:")
+        for model_name, ms in models.items():
+            latency_str = f"  avg={ms['avg_latency_ms']}ms" if "avg_latency_ms" in ms else ""
+            lines.append(f"    {model_name}: reqs={ms['requests']} faults={ms['faults']} recovered={ms['recovered']}{latency_str}")
+
+    # Latency
+    lat = data.get("latency")
+    if lat:
+        lines.append(f"  Latency: avg={lat['avg_ms']}ms  p95={lat['p95_ms']}ms  max={lat['max_ms']}ms")
+
+    return lines
+
+
 def print_scorecard() -> None:
     state = service_state
     if state is None:
         return
-    lines = [
-        "",
-        "AgentBreak Resilience Scorecard",
-        "",
-    ]
+    lines = ["", "AgentBreak Report Card", ""]
     if state.llm_runtime is not None:
-        llm = state.llm_runtime.scorecard_data()
-        lines.extend(
-            [
-                "LLM Runtime",
-                f"Requests Seen: {llm['requests_seen']}",
-                f"Injected Faults: {llm['injected_faults']}",
-                f"Latency Injections: {llm['latency_injections']}",
-                f"Upstream Successes: {llm['upstream_successes']}",
-                f"Upstream Failures: {llm['upstream_failures']}",
-                f"Duplicate Requests: {llm['duplicate_requests']}",
-                f"Suspected Loops: {llm['suspected_loops']}",
-                f"Run Outcome: {llm['run_outcome']}",
-                f"Resilience Score: {llm['resilience_score']}/100",
-                "",
-            ]
-        )
+        lines.extend(_format_summary_lines("LLM", state.llm_runtime.scorecard_data()))
+        lines.append("")
     if state.mcp_runtime is not None:
-        mcp = state.mcp_runtime.scorecard_data()
-        lines.extend(
-            [
-                "MCP Runtime",
-                f"Requests Seen: {mcp['requests_seen']}",
-                f"Tool Calls: {mcp['tool_calls']}",
-                f"Injected Faults: {mcp['injected_faults']}",
-                f"Latency Injections: {mcp['latency_injections']}",
-                f"Response Mutations: {mcp['response_mutations']}",
-                f"Upstream Successes: {mcp['upstream_successes']}",
-                f"Upstream Failures: {mcp['upstream_failures']}",
-                f"Duplicate Requests: {mcp['duplicate_requests']}",
-                f"Suspected Loops: {mcp['suspected_loops']}",
-                f"Run Outcome: {mcp['run_outcome']}",
-                f"Resilience Score: {mcp['resilience_score']}/100",
-                "",
-            ]
-        )
+        lines.extend(_format_summary_lines("MCP", state.mcp_runtime.scorecard_data()))
+        lines.append("")
     print("\n".join(lines), file=sys.stderr)
+
+
+def _build_full_report(state: ServiceState) -> dict[str, Any]:
+    """Build the full report card with all details."""
+    report: dict[str, Any] = {
+        "version": 1,
+        "agentbreak_version": __version__,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "label": state.run_label,
+    }
+    if state.llm_runtime is not None:
+        report["llm"] = state.llm_runtime.scorecard_data()
+    if state.mcp_runtime is not None:
+        report["mcp"] = state.mcp_runtime.scorecard_data()
+    return report
+
+
+def _save_report_file(report: dict[str, Any]) -> Path | None:
+    """Save full report JSON to .agentbreak/reports/."""
+    try:
+        reports_dir = Path(".agentbreak/reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        report_path = reports_dir / f"report-{ts}.json"
+        report_path.write_text(json.dumps(report, indent=2) + "\n")
+        return report_path
+    except Exception:
+        logger.debug("failed to save report file", exc_info=True)
+        return None
 
 
 def _save_run_to_history() -> None:
     state = service_state
-    if state is None or state.history is None:
+    if state is None:
         return
-    try:
-        llm_scorecard = state.llm_runtime.scorecard_data() if state.llm_runtime else None
-        mcp_scorecard = state.mcp_runtime.scorecard_data() if state.mcp_runtime else None
-        scenarios = [s.model_dump() for s in state.scenarios.scenarios] if state.scenarios.scenarios else None
-        state.history.save_run(llm_scorecard=llm_scorecard, mcp_scorecard=mcp_scorecard, scenarios=scenarios, label=state.run_label)
-        logger.info("saved run to history")
-    except Exception:
-        logger.debug("failed to save run to history", exc_info=True)
+    report = _build_full_report(state)
+
+    # Always save report file
+    report_path = _save_report_file(report)
+    if report_path:
+        print(f"\nFull report: {report_path}", file=sys.stderr)
+
+    # Save to history DB if enabled
+    if state.history is not None:
+        try:
+            llm_scorecard = report.get("llm")
+            mcp_scorecard = report.get("mcp")
+            scenarios = [s.model_dump() for s in state.scenarios.scenarios] if state.scenarios.scenarios else None
+            state.history.save_run(llm_scorecard=llm_scorecard, mcp_scorecard=mcp_scorecard, scenarios=scenarios, label=state.run_label)
+            logger.info("saved run to history")
+        except Exception:
+            logger.debug("failed to save run to history", exc_info=True)
 
 
 @app.post("/v1/chat/completions")
