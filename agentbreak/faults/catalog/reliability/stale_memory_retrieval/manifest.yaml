@@ -1,0 +1,7 @@
+id: stale_memory_retrieval
+name: Stale Memory Retrieval
+category: reliability
+targets: [memory]
+phase: post
+description: "memory retrieval returned stale information from an older run"
+fix_hint: "Add freshness checks and ranking so stale memories do not outrank current context"

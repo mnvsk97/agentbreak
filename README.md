@@ -79,11 +79,16 @@ preset: brownout
 
 Available presets: `standard`, `standard-mcp`, `standard-all`, `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
 
+New compact planning presets: `deploy-risk`, `retry-resilience`, `incident-replay`.
+
 ## MCP testing
 
 ```bash
 agentbreak inspect    # discover tools from your MCP server
 agentbreak serve      # proxy both LLM and MCP traffic
+agentbreak recommend  # suggest what to test next
+agentbreak incident-replay --text "..."   # turn an incident into scenarios
+agentbreak synthesize --run-id 1          # summarize what broke
 ```
 
 ## Track resilience over time

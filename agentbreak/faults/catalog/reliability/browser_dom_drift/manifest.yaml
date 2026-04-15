@@ -1,0 +1,7 @@
+id: browser_dom_drift
+name: Browser DOM Drift
+category: reliability
+targets: [browser_worker]
+phase: post
+description: "the browser DOM changed enough that expected selectors no longer matched"
+fix_hint: "Use resilient selectors and detect UI drift before repeating the same action"

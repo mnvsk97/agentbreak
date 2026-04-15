@@ -29,6 +29,14 @@ from agentbreak.behaviors import apply_response_behavior
 from agentbreak.config import ApplicationConfig, MCPConfig, MCPRegistry, load_application_config, load_registry, save_registry
 from agentbreak.discovery.mcp import MCP_PROTOCOL_VERSION, inspect_mcp_server, parse_mcp_response
 from agentbreak.history import RunHistory
+from agentbreak.intelligence import (
+    execute_virtual_scenario as _execute_virtual_scenario,
+    recent_git_paths as _intelligence_recent_git_paths,
+    recommend as recommend_intelligence,
+    render_incident_yaml,
+    render_json,
+    synthesize_from_history,
+)
 from agentbreak.faults import REGISTRY, FaultContext
 from agentbreak.faults._primitives import PRIMITIVES
 from agentbreak.scenarios import Scenario, ScenarioFile, load_scenarios, validate_scenarios
@@ -988,6 +996,14 @@ def load_service_state(
         mcp_runtime=mcp_runtime,
         history=history,
     )
+
+
+def _recent_git_paths(project_path: str = ".") -> list[str]:
+    return _intelligence_recent_git_paths(project_path)
+
+
+def execute_virtual_scenario(scenario: Scenario) -> dict[str, Any]:
+    return _execute_virtual_scenario(scenario)
 
 
 def choose_matching_scenario(
@@ -1985,6 +2001,45 @@ def validate(
                 typer.echo(r)
         else:
             typer.echo("No proxy-mode upstreams to check.")
+
+
+@cli.command("recommend", help="Recommend the highest-value scenarios from config, registry, and recent git changes.")
+def recommend_command(
+    config_path: str | None = typer.Option(None, "--config", help="Config path. Defaults to .agentbreak/application.yaml."),
+    scenarios_path: str | None = typer.Option(None, "--scenarios", help="Scenarios path. Defaults to .agentbreak/scenarios.yaml."),
+    registry_path: str | None = typer.Option(None, "--registry", help="Registry path."),
+    project_path: str = typer.Option(".", "--project-path", help="Project path for git diff inspection."),
+) -> None:
+    state = load_service_state(config_path, scenarios_path, registry_path, require_registry=False)
+    if not state.registry.tools and not state.registry.resources and not state.registry.prompts:
+        try:
+            state.registry = load_registry(registry_path)
+        except Exception:
+            pass
+    payload = recommend_intelligence(
+        project_path=project_path,
+        application=state.application,
+        registry=state.registry,
+        git_paths=_recent_git_paths(project_path),
+    )
+    typer.echo(render_json(payload))
+
+
+@cli.command("incident-replay", help="Convert incident text into pasteable AgentBreak scenarios.")
+def incident_replay_command(
+    text: str = typer.Option(..., "--text", help="Incident or postmortem text to convert into scenarios."),
+) -> None:
+    typer.echo(render_incident_yaml(text))
+
+
+@cli.command("synthesize", help="Summarize what broke in a run or run comparison.")
+def synthesize_command(
+    history_db: str = typer.Option(".agentbreak/history.db", "--history-db", help="History database path."),
+    run_id: int = typer.Option(..., "--run-id", help="Run ID to summarize."),
+    compare_run_id: int | None = typer.Option(None, "--compare-run-id", help="Optional baseline run ID."),
+) -> None:
+    payload = synthesize_from_history(history_db=history_db, run_id=run_id, compare_run_id=compare_run_id)
+    typer.echo(render_json(payload))
 
 
 @cli.command(help="Run the local verification suite.")

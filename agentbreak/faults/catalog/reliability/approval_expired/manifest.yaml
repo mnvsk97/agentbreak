@@ -1,0 +1,8 @@
+id: approval_expired
+name: Expired Approval Token
+category: reliability
+targets: [approval]
+phase: pre
+action: return_error
+description: "approval token expired before the protected action completed"
+fix_hint: "Detect expired approvals and request a fresh confirmation before proceeding"

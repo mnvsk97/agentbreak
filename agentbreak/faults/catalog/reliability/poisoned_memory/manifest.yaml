@@ -1,0 +1,7 @@
+id: poisoned_memory
+name: Poisoned Memory
+category: reliability
+targets: [memory]
+phase: post
+description: "memory retrieval returned poisoned content that could steer the agent incorrectly"
+fix_hint: "Validate recalled memory and prefer trusted or recent sources before acting on it"

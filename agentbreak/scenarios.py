@@ -173,6 +173,52 @@ PRESET_SCENARIOS: dict[str, list[dict[str, Any]]] = {
             "schedule": {"mode": "random", "probability": 0.2},
         },
     ],
+    "deploy-risk": [
+        {
+            "name": "deploy-memory-poison",
+            "summary": "Memory retrieval returns poisoned content after a deploy",
+            "target": "memory",
+            "match": {},
+            "fault": {"kind": "poisoned_memory"},
+            "schedule": {"mode": "always"},
+        },
+        {
+            "name": "deploy-queue-duplicate",
+            "summary": "Queue delivers duplicate work after a deploy",
+            "target": "queue",
+            "match": {},
+            "fault": {"kind": "queue_duplicate_delivery"},
+            "schedule": {"mode": "always"},
+        },
+    ],
+    "retry-resilience": [
+        {
+            "name": "retry-llm-rate-limit",
+            "summary": "LLM rate limits should trigger bounded retries",
+            "target": "llm_chat",
+            "match": {},
+            "fault": {"kind": "http_error", "status_code": 429},
+            "schedule": {"mode": "random", "probability": 0.3},
+        },
+        {
+            "name": "retry-queue-delay",
+            "summary": "Delayed queue delivery should not cause runaway retries",
+            "target": "queue",
+            "match": {},
+            "fault": {"kind": "queue_delayed_delivery"},
+            "schedule": {"mode": "always"},
+        },
+    ],
+    "incident-replay": [
+        {
+            "name": "incident-memory-stale",
+            "summary": "Replay stale memory from a prior incident",
+            "target": "memory",
+            "match": {},
+            "fault": {"kind": "stale_memory_retrieval"},
+            "schedule": {"mode": "always"},
+        }
+    ],
 }
 PRESET_SCENARIOS["mcp-security"] = [
     {
@@ -231,7 +277,7 @@ Target = Literal[
     "telemetry",
 ]
 
-SUPPORTED_TARGETS = {"llm_chat", "mcp_tool"}
+SUPPORTED_TARGETS = {"llm_chat", "mcp_tool", "memory", "approval", "queue", "browser_worker"}
 
 # Fault kinds are auto-discovered from agentbreak/faults/catalog/
 # Import at module level but use lazy initialization to avoid circular imports
@@ -365,16 +411,20 @@ def validate_scenarios(scenarios: ScenarioFile) -> None:
             + "."
         )
 
-    # Derive MCP-only kinds from registry instead of hardcoding
-    mcp_only_kinds = set()
-    for kind, fault_def in REGISTRY.items():
-        if fault_def.targets == {"mcp_tool"}:
-            mcp_only_kinds.add(kind)
-
-    invalid = sorted(
-        scenario.name
-        for scenario in scenarios.scenarios
-        if scenario.target == "llm_chat" and scenario.fault.kind in mcp_only_kinds
-    )
-    if invalid:
-        raise ValueError(f"llm_chat does not support these fault kinds ({', '.join(mcp_only_kinds)}): " + ", ".join(invalid))
+    invalid_pairs: list[str] = []
+    llm_invalid_kinds: set[str] = set()
+    for scenario in scenarios.scenarios:
+        fault_def = REGISTRY.get(scenario.fault.kind)
+        if fault_def is not None and scenario.target not in fault_def.targets:
+            invalid_pairs.append(f"{scenario.name} ({scenario.target} -> {scenario.fault.kind})")
+            if scenario.target == "llm_chat":
+                llm_invalid_kinds.add(scenario.fault.kind)
+    if invalid_pairs:
+        if llm_invalid_kinds:
+            raise ValueError(
+                f"llm_chat does not support these fault kinds ({', '.join(sorted(llm_invalid_kinds))}): "
+                + ", ".join(sorted(invalid_pairs))
+            )
+        raise ValueError(
+            "Scenario target does not support fault kind: " + ", ".join(sorted(invalid_pairs))
+        )

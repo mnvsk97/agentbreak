@@ -1,0 +1,11 @@
+id: queue_delayed_delivery
+name: Delayed Queue Delivery
+category: reliability
+targets: [queue]
+phase: pre
+action: delay
+params:
+  min_ms: 2000
+  max_ms: 5000
+description: "queue delivery was delayed enough to stress timeout and retry logic"
+fix_hint: "Use bounded waits and make retry logic robust to delayed deliveries"

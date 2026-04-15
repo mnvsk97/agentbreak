@@ -131,3 +131,7 @@ def test_all_presets_are_valid():
 def test_load_scenarios_missing_file_returns_empty():
     sf = load_scenarios("/nonexistent/path/scenarios.yaml")
     assert sf.scenarios == []
+
+
+def test_new_presets_exist():
+    assert {"deploy-risk", "retry-resilience", "incident-replay"}.issubset(PRESET_SCENARIOS.keys())

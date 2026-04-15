@@ -1,0 +1,7 @@
+id: queue_duplicate_delivery
+name: Duplicate Queue Delivery
+category: reliability
+targets: [queue]
+phase: post
+description: "the queue delivered the same message more than once"
+fix_hint: "Make downstream processing idempotent and deduplicate with stable message identifiers"

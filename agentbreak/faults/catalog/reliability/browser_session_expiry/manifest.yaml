@@ -1,0 +1,8 @@
+id: browser_session_expiry
+name: Browser Session Expiry
+category: reliability
+targets: [browser_worker]
+phase: pre
+action: return_error
+description: "browser automation lost its authenticated session mid-flow"
+fix_hint: "Detect expired browser sessions and re-authenticate or fail gracefully"

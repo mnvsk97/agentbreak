@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from agentbreak import main
+from agentbreak.history import RunHistory
 from agentbreak.config import MCPPrompt, MCPRegistry, MCPResource, MCPTool
 from agentbreak.discovery import mcp as mcp_discovery
 from agentbreak.scenarios import ScenarioFile, load_scenarios
@@ -185,7 +187,7 @@ def test_load_scenarios_expands_presets(tmp_path: Path) -> None:
     assert {scenario.target for scenario in scenario_file.scenarios} == {"mcp_tool"}
 
 
-def test_validate_rejects_unsupported_targets(tmp_path: Path) -> None:
+def test_validate_rejects_invalid_fault_for_new_target(tmp_path: Path) -> None:
     application_path = tmp_path / "application.yaml"
     scenarios_path = tmp_path / "scenarios.yaml"
     write_application(application_path)
@@ -205,7 +207,7 @@ def test_validate_rejects_unsupported_targets(tmp_path: Path) -> None:
 
     result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--scenarios", str(scenarios_path)])
     assert result.exit_code != 0
-    assert "Unsupported scenario targets" in str(result.exception)
+    assert "Scenario target does not support fault kind" in str(result.exception)
 
 
 def test_validate_rejects_llm_timeout_fault(tmp_path: Path) -> None:
@@ -229,6 +231,152 @@ def test_validate_rejects_llm_timeout_fault(tmp_path: Path) -> None:
     result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--scenarios", str(scenarios_path)])
     assert result.exit_code != 0
     assert "llm_chat does not support these fault kinds" in str(result.exception)
+
+
+def test_validate_accepts_new_target_faults(tmp_path: Path) -> None:
+    application_path = tmp_path / "application.yaml"
+    scenarios_path = tmp_path / "scenarios.yaml"
+    write_application(application_path)
+    write_scenarios(
+        scenarios_path,
+        [
+            {
+                "name": "memory-poison",
+                "summary": "Poison memory retrieval",
+                "target": "memory",
+                "fault": {"kind": "poisoned_memory"},
+                "schedule": {"mode": "always"},
+            },
+            {
+                "name": "approval-expired",
+                "summary": "Approval token expires",
+                "target": "approval",
+                "fault": {"kind": "approval_expired"},
+                "schedule": {"mode": "always"},
+            },
+        ],
+    )
+
+    result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--scenarios", str(scenarios_path)])
+    assert result.exit_code == 0
+    assert "Config valid" in result.stdout
+
+
+def test_validate_rejects_fault_target_mismatch(tmp_path: Path) -> None:
+    application_path = tmp_path / "application.yaml"
+    scenarios_path = tmp_path / "scenarios.yaml"
+    write_application(application_path)
+    write_scenarios(
+        scenarios_path,
+        [
+            {
+                "name": "memory-http-error",
+                "summary": "Wrong fault for target",
+                "target": "memory",
+                "fault": {"kind": "http_error", "status_code": 500},
+                "schedule": {"mode": "always"},
+            }
+        ],
+    )
+
+    result = runner.invoke(main.cli, ["validate", "--config", str(application_path), "--scenarios", str(scenarios_path)])
+    assert result.exit_code != 0
+    assert "does not support fault kind" in str(result.exception)
+
+
+def test_recommend_command_outputs_blast_radius(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    agentbreak_dir = tmp_path / ".agentbreak"
+    agentbreak_dir.mkdir()
+    write_application(agentbreak_dir / "application.yaml")
+    write_scenarios(agentbreak_dir / "scenarios.yaml", [])
+    (agentbreak_dir / "registry.json").write_text(
+        json.dumps(
+            {
+                "tools": [{"name": "search_docs", "description": "Search", "inputSchema": {"type": "object"}}],
+                "resources": [],
+                "prompts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "_recent_git_paths", lambda project_path=".": ["memory_store.py", "browser/session.py", "queue_worker.py"])
+
+    result = runner.invoke(main.cli, ["recommend"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert {"memory", "browser_worker", "queue"}.issubset(set(payload["blast_radius"]["targets"]))
+    assert "deploy-risk" in payload["recommended_presets"]
+    assert payload["recommended_scenarios"]
+
+
+def test_incident_replay_command_generates_yaml(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        main.cli,
+        ["incident-replay", "--text", "We saw duplicate queue deliveries, stale memory retrieval, and browser session expiry."],
+    )
+    assert result.exit_code == 0
+    payload = yaml.safe_load(result.stdout)
+    targets = {item["target"] for item in payload["scenarios"]}
+    assert {"queue", "memory", "browser_worker"}.issubset(targets)
+
+
+def test_synthesize_command_summarizes_run(tmp_path: Path) -> None:
+    history = RunHistory(str(tmp_path / "history.db"))
+    run_id = history.save_run(
+        llm_scorecard={
+            "resilience_score": 64,
+            "run_outcome": "DEGRADED",
+            "upstream_failures": 2,
+            "duplicate_requests": 1,
+            "suspected_loops": 1,
+            "scenarios": [{"name": "std-llm-rate-limit", "kind": "http_error", "status": "failed"}],
+        },
+        mcp_scorecard=None,
+    )
+
+    result = runner.invoke(main.cli, ["synthesize", "--history-db", str(tmp_path / "history.db"), "--run-id", str(run_id)])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "upstream instability" in payload["failure_themes"]
+    assert "retry or loop control" in payload["next_fixes"]
+
+
+def test_execute_memory_fault():
+    scenario = ScenarioFile.model_validate(
+        {"scenarios": [{"name": "memory", "summary": "memory", "target": "memory", "fault": {"kind": "poisoned_memory"}}]}
+    ).scenarios[0]
+    result = main.execute_virtual_scenario(scenario)
+    assert result["target"] == "memory"
+    assert result["fault"] == "poisoned_memory"
+
+
+def test_execute_approval_fault():
+    scenario = ScenarioFile.model_validate(
+        {"scenarios": [{"name": "approval", "summary": "approval", "target": "approval", "fault": {"kind": "approval_expired"}}]}
+    ).scenarios[0]
+    result = main.execute_virtual_scenario(scenario)
+    assert result["target"] == "approval"
+    assert result["status"] == "error"
+
+
+def test_execute_queue_fault():
+    scenario = ScenarioFile.model_validate(
+        {"scenarios": [{"name": "queue", "summary": "queue", "target": "queue", "fault": {"kind": "queue_duplicate_delivery"}}]}
+    ).scenarios[0]
+    result = main.execute_virtual_scenario(scenario)
+    assert result["target"] == "queue"
+    assert result["fault"] == "queue_duplicate_delivery"
+
+
+def test_execute_browser_fault():
+    scenario = ScenarioFile.model_validate(
+        {"scenarios": [{"name": "browser", "summary": "browser", "target": "browser_worker", "fault": {"kind": "browser_session_expiry"}}]}
+    ).scenarios[0]
+    result = main.execute_virtual_scenario(scenario)
+    assert result["target"] == "browser_worker"
+    assert result["status"] == "error"
 
 
 def test_mcp_only_mock_config_is_valid() -> None:

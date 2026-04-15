@@ -17,6 +17,8 @@ import httpx
 import yaml
 from mcp.server.fastmcp import FastMCP
 
+from agentbreak.intelligence import recommend as recommend_intelligence, render_incident_yaml, render_json, synthesize_from_history
+
 mcp = FastMCP("agentbreak")
 
 
@@ -226,6 +228,34 @@ def agentbreak_analyze(project_path: str = ".") -> str:
         "env_file": env_file,
         "relevant_env_vars": env_vars,
     }, indent=2)
+
+
+@mcp.tool()
+def agentbreak_recommend(project_path: str = ".") -> str:
+    """Recommend scenarios from current config, registry, and recent git changes."""
+    from agentbreak.main import load_service_state
+    from agentbreak.config import load_registry
+
+    _state.project_path = project_path
+    state = load_service_state(None, None, None, require_registry=False)
+    if not state.registry.tools and not state.registry.resources and not state.registry.prompts:
+        try:
+            state.registry = load_registry(None)
+        except Exception:
+            pass
+    return render_json(recommend_intelligence(project_path=project_path, application=state.application, registry=state.registry))
+
+
+@mcp.tool()
+def agentbreak_incident_replay(text: str) -> str:
+    """Convert incident text into pasteable AgentBreak scenarios."""
+    return render_incident_yaml(text)
+
+
+@mcp.tool()
+def agentbreak_synthesize(history_db: str = ".agentbreak/history.db", run_id: int = 1, compare_run_id: int | None = None) -> str:
+    """Summarize what broke in a run or run comparison."""
+    return render_json(synthesize_from_history(history_db=history_db, run_id=run_id, compare_run_id=compare_run_id))
 
 
 @mcp.tool()
