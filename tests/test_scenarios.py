@@ -128,6 +128,36 @@ def test_all_presets_are_valid():
         sf = ScenarioFile.model_validate({"scenarios": entries})
         assert len(sf.scenarios) > 0, f"Preset {name} is empty"
 
+def test_all_presets_pass_full_validation():
+    """Every preset must reference real fault kinds and supported targets."""
+    from agentbreak.scenarios import validate_scenarios
+    for name, entries in PRESET_SCENARIOS.items():
+        sf = ScenarioFile.model_validate({"scenarios": entries})
+        try:
+            validate_scenarios(sf)
+        except ValueError as exc:  # pragma: no cover - failure path
+            raise AssertionError(f"Preset {name} failed validation: {exc}") from exc
+
+def test_every_preset_is_documented_in_readme():
+    """Guard against doc drift: each preset key must appear in the README."""
+    from pathlib import Path
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    undocumented = sorted(name for name in PRESET_SCENARIOS if f"`{name}`" not in readme)
+    assert not undocumented, f"presets missing from README: {undocumented}"
+
+def test_injection_suite_preset_covers_llm_and_mcp():
+    entries = PRESET_SCENARIOS["injection-suite"]
+    kinds = {e["fault"]["kind"] for e in entries}
+    targets = {e["target"] for e in entries}
+    assert {"llm_chat", "mcp_tool"} <= targets
+    assert {"indirect_injection", "tool_description_injection", "cross_server_shadowing"} <= kinds
+
 def test_load_scenarios_missing_file_returns_empty():
     sf = load_scenarios("/nonexistent/path/scenarios.yaml")
     assert sf.scenarios == []
+
+def test_load_scenarios_expands_injection_suite_preset(tmp_path):
+    scenarios_file = tmp_path / "scenarios.yaml"
+    scenarios_file.write_text("preset: injection-suite\n", encoding="utf-8")
+    sf = load_scenarios(str(scenarios_file))
+    assert {s.fault.kind for s in sf.scenarios} >= {"encoding_evasion", "indirect_injection"}

@@ -94,7 +94,19 @@ Don't want to write YAML? Use a preset:
 preset: brownout
 ```
 
-Available presets: `standard`, `standard-mcp`, `standard-all`, `brownout`, `mcp-slow-tools`, `mcp-tool-failures`, `mcp-mixed-transient`.
+Available presets:
+
+| Preset | Focus |
+|--------|-------|
+| `standard` | Common LLM failures (rate limits, 500s, latency, bad JSON, empty/invalid responses) |
+| `standard-mcp` | Common MCP tool failures (503s, timeouts, latency, empty/invalid/garbage responses) |
+| `standard-all` | Everything in `standard` + `standard-mcp` |
+| `brownout` | Intermittent LLM latency and rate limits |
+| `mcp-slow-tools` | Heavy latency on MCP tool calls |
+| `mcp-tool-failures` | MCP transport failures (503s) |
+| `mcp-mixed-transient` | Intermittent MCP latency + transport failures |
+| `mcp-security` | MCP prompt injection, exfiltration, cross-tool, many-shot, and rug pulls |
+| `injection-suite` | Prompt-injection surface sweep — encoding evasion and invisible text on LLM output, plus indirect injection, tool-description poisoning, and cross-server shadowing on MCP tools |
 
 ## MCP testing
 
