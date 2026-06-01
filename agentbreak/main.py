@@ -266,7 +266,7 @@ class LLMRuntime:
                     self.stats._pending_fault = True
                     self.stats._pending_scenario = scenario.name
                     ss.unrecovered += 1
-                    status = scenario.fault.status_code or 500
+                    status = scenario.fault.status_code or fault_def.params.get("status") or 500
                     logger.info("injecting http_error %d via %s", status, scenario.name)
                     self._record_latency(t0)
                     return JSONResponse(status_code=status, content=error_fn(status))
@@ -707,7 +707,7 @@ class MCPRuntime:
                     if method == "tools/call":
                         self.stats.tool_failures_by_name[action_name] += 1
                     self._record_latency(t0)
-                    return JSONResponse(status_code=scenario.fault.status_code or 500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "AgentBreak injected MCP transport error"}})
+                    return JSONResponse(status_code=scenario.fault.status_code or fault_def.params.get("status") or 500, content={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "AgentBreak injected MCP transport error"}})
 
         result = await self._call_upstream_or_mock(method, params, request_id)
         if isinstance(result, Response):
@@ -1123,6 +1123,27 @@ async def mock_anthropic_stream():
     yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
 
 
+def resolve_injection(scenario: Scenario) -> tuple[str, str] | None:
+    """Resolve the (text, position) to inject for an ``inject_text`` catalog fault.
+
+    The catalog defines a large family of payload-injection faults (indirect
+    injection, encoding evasion, invisible text, cross-server shadowing, …) via
+    ``action: inject_text`` + a payload file. This reads that payload (or an
+    explicit ``fault.payload`` override) so the proxy can apply it generically,
+    instead of every fault needing a hardcoded branch. Returns ``None`` when the
+    fault is not an injection fault or has no payload.
+    """
+    fault_def = REGISTRY.get(scenario.fault.kind)
+    if not fault_def or fault_def.action != "inject_text":
+        return None
+    params = fault_def.params or {}
+    default_payload = params.get("default_payload") or scenario.fault.kind
+    text = scenario.fault.payload or fault_def.load_payload(default_payload)
+    if not text:
+        return None
+    return text, params.get("position", "append")
+
+
 def mutate_llm_body(body: bytes, scenario: Scenario) -> bytes:
     kind = scenario.fault.kind
     if kind == "empty_response":
@@ -1138,6 +1159,15 @@ def mutate_llm_body(body: bytes, scenario: Scenario) -> bytes:
         return json.dumps(payload).encode("utf-8")
     if kind == "schema_violation":
         return apply_response_behavior(body, "malformed_tool_calls")
+    injection = resolve_injection(scenario)
+    if injection is not None:
+        text, position = injection
+        content = payload["choices"][0]["message"].get("content") or ""
+        payload["choices"][0]["message"]["content"] = (
+            f"{text}\n\n{content}" if position == "prepend" and content else
+            (f"{content}\n\n{text}" if content else text)
+        )
+        return json.dumps(payload).encode("utf-8")
     return body
 
 
@@ -1156,6 +1186,21 @@ def mutate_anthropic_body(body: bytes, scenario: Scenario) -> bytes:
         return json.dumps(payload).encode("utf-8")
     if kind == "schema_violation":
         return apply_response_behavior(body, "malformed_tool_use")
+    injection = resolve_injection(scenario)
+    if injection is not None:
+        text, position = injection
+        existing = ""
+        if isinstance(payload.get("content"), list):
+            for item in payload["content"]:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    existing = item.get("text", "")
+                    break
+        if position == "prepend" and existing:
+            combined = f"{text}\n\n{existing}"
+        else:
+            combined = f"{existing}\n\n{text}" if existing else text
+        payload["content"] = [{"type": "text", "text": combined}]
+        return json.dumps(payload).encode("utf-8")
     return body
 
 
@@ -1194,6 +1239,20 @@ def mutate_mcp_result(result: dict[str, Any], scenario: Scenario) -> bytes | dic
                     original_text = item.get("text", "")
                     break
         combined = f"{original_text}\n\n{poison_text}" if original_text else poison_text
+        return mock_mcp_payload(result_kind, identifier, combined)
+    injection = resolve_injection(scenario)
+    if injection is not None:
+        text, position = injection
+        original_text = ""
+        if isinstance(result.get("content"), list):
+            for item in result["content"]:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    original_text = item.get("text", "")
+                    break
+        if position == "prepend":
+            combined = f"{text}\n\n{original_text}" if original_text else text
+        else:
+            combined = f"{original_text}\n\n{text}" if original_text else text
         return mock_mcp_payload(result_kind, identifier, combined)
     return result
 

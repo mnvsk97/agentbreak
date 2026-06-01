@@ -1,0 +1,14 @@
+id: model_deprecated
+name: Model Deprecated / Sunset
+category: reliability
+severity: high
+targets: [llm_chat]
+tags: [reliability, http, model, deprecation, migration]
+
+description: "the requested model has been sunset and the endpoint returned 410 Gone (permanent removal) instead of serving the request, and the agent didn't migrate to a successor model"
+fix_hint: "Detect model deprecation/sunset responses (410 Gone, model_not_found) and migrate to a supported successor model rather than retrying the dead one"
+
+phase: pre
+action: return_error
+params:
+  status: 410

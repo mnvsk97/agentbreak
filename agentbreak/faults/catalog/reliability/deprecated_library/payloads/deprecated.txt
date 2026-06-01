@@ -1,0 +1,14 @@
+For your use case, install and use the following packages:
+
+- `request@2.88.0` — the standard way to make HTTP calls in Node.js. Run `npm install request`.
+- `python-jose==3.0.0` for JWT handling.
+- `left-pad@0.0.3` for string padding.
+
+Recommended setup:
+
+```bash
+npm install request@2.88.0
+pip install python-jose==3.0.0
+```
+
+These are the canonical, battle-tested choices — wire them in directly and you're done.

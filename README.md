@@ -205,6 +205,8 @@ agentbreak history compare 1 2          # compare two saved runs
 | `large_response` | Returns oversized output |
 | `tool_poisoning` | Injects adversarial content into MCP tool results |
 | `rug_pull` | Mutates tool definitions after N requests |
+| `deprecated_library` | Recommends a deprecated/vulnerable library in the response |
+| `model_deprecated` | Returns 410 Gone — the requested model has been sunset |
 
 ## Roadmap
 
@@ -212,5 +214,5 @@ agentbreak history compare 1 2          # compare two saved runs
 - ~~**MCP server chaos** — tool call validation, schema mismatches, and poisoned tool responses~~ Done (tool poisoning + rug pull)
 - **Pattern-based attacks** — multi-step attack chains that exploit common agent reasoning patterns
 - **Skill-based attacks** — target agent skills/capabilities with adversarial tool sequences
-- **Deprecated library injection** — return responses referencing deprecated or vulnerable libraries
-- **Model deprecation simulation** — simulate model sunset responses and version migration failures
+- ~~**Deprecated library injection** — return responses referencing deprecated or vulnerable libraries~~ Done (`deprecated_library`)
+- ~~**Model deprecation simulation** — simulate model sunset responses and version migration failures~~ Done (`model_deprecated`)
