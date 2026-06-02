@@ -1,0 +1,12 @@
+# Code owners for AgentBreak.
+# These users are automatically requested for review on pull requests.
+# See https://docs.github.com/articles/about-code-owners
+
+# Default owners for everything in the repo
+*       @mnvsk97 @bennjph
+
+# Fault catalog
+/agentbreak/faults/    @mnvsk97 @bennjph
+
+# Tests
+/tests/                @mnvsk97 @bennjph
